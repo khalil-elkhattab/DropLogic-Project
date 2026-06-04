@@ -1,0 +1,15 @@
+# الحفاظ على بيئة بايثون الافتراضية محلياً
+backend/venv/
+backend/.venv/
+__pycache__/
+*.pyc
+
+# الحفاظ على ملفات نود وتايب سكريبت محلياً
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# ملفات النظام الروتيني
+.DS_Store
+Thumbs.db
+Desktop.ini
