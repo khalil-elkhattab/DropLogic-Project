@@ -1,8 +1,8 @@
 "use client";
 import React from 'react';
 import { UserButton } from "@clerk/clerk-react";
-// استدعاء الموجه البرمجي للتنقل بين الصفحات
 import { useRouter } from 'next/navigation';
+import DropLogicLogo from '@/components/brand/DropLogicLogo';
 
 export default function DashboardLaunchpad() {
   const router = useRouter();
@@ -15,6 +15,10 @@ export default function DashboardLaunchpad() {
   // دالة للذهاب إلى صفحة الأسعار المربوطة بـ Clerk Billing
   const handleNavigateToPricing = () => {
     router.push('/dashboard/pricing');
+  };
+
+  const handleNavigateToHistory = () => {
+    router.push('/dashboard/history');
   };
 
   return (
@@ -30,12 +34,11 @@ export default function DashboardLaunchpad() {
       {/* 2. Navigation (Minimal & Sharp) */}
       <nav className="h-16 border-b border-black/[0.08] bg-white/80 backdrop-blur-xl flex items-center justify-between px-6 md:px-10 sticky top-0 z-50">
         <div className="flex items-center gap-8">
-          <div onClick={() => router.push('/dashboard')} className="text-lg font-black tracking-tighter uppercase italic cursor-pointer">
-            DropLogic<span className="text-blue-600">.</span> 
-          </div>
+          <DropLogicLogo href="/dashboard" size="md" className="italic" />
           <div className="hidden md:flex gap-6 text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">
             <span className="text-black border-b-2 border-black pb-1 cursor-pointer">Workspace</span>
             <span onClick={handleNavigateToPricing} className="hover:text-black cursor-pointer transition text-blue-600 font-black">⚡ Pricing</span>
+            <span onClick={handleNavigateToHistory} className="hover:text-black cursor-pointer transition">Ad History</span>
             <span className="hover:text-black cursor-pointer transition">Neural_Feed</span>
             <span className="hover:text-black cursor-pointer transition">Settings</span>
           </div>

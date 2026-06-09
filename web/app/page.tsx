@@ -1,12 +1,14 @@
 "use client";
 import React from 'react';
-import Link from 'next/link'; // أضفنا هذا السطر للربط بين الصفحات
+import Link from 'next/link';
 import { 
   SignedIn, 
   SignedOut, 
   SignInButton, 
   UserButton 
 } from "@clerk/clerk-react";
+import DropLogicLogo from '@/components/brand/DropLogicLogo';
+import FaqAccordion from '@/components/FaqAccordion';
 
 export default function Home() {
   const testimonials = [
@@ -42,12 +44,11 @@ export default function Home() {
       <nav className="sticky top-0 z-50 border-b border-black/[0.05] bg-white/80 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <div className="text-lg font-bold tracking-tighter uppercase">
-              DropLogic<span className="text-blue-600">.</span>
-            </div>
+            <DropLogicLogo href="/" size="md" />
             <div className="hidden md:flex gap-6 text-[13px] font-medium text-gray-500">
               <a href="#demo" className="hover:text-black transition">Demo</a>
               <a href="#features" className="hover:text-black transition">Solutions</a>
+              <a href="#faq" className="hover:text-black transition">FAQ</a>
               <a href="#feedback" className="hover:text-black transition">Feedback</a>
             </div>
           </div>
@@ -165,8 +166,10 @@ export default function Home() {
         </div>
       </section>
 
+      <FaqAccordion />
+
       {/* Feedback Section */}
-      <section id="feedback" className="px-6 md:px-8 py-20 md:py-32 bg-[#fafafa] border-y border-black/[0.05]">
+      <section id="feedback" className="px-6 md:px-8 py-20 md:py-32 bg-white border-y border-black/[0.05]">
         <div className="max-w-6xl mx-auto text-center">
           <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-gray-400 mb-12 md:mb-16">Trusted by the next generation</h3>
           <div className="grid md:grid-cols-3 gap-6 md:gap-8">
@@ -196,6 +199,10 @@ export default function Home() {
       </section>
 
       <footer className="p-12 text-center border-t border-black/[0.05]">
+        <div className="flex flex-wrap justify-center gap-4 md:gap-6 mb-4 text-[11px] font-medium text-gray-500">
+          <Link href="/privacy" className="hover:text-black transition">Privacy Policy</Link>
+          <Link href="/terms" className="hover:text-black transition">Terms of Service</Link>
+        </div>
         <div className="text-[10px] md:text-[12px] text-gray-400 font-mono">
           © 2026 DROPLOGIC. ALL RIGHTS RESERVED. <br />
           <span className="mt-2 inline-block">ENGINEERED FOR EXCELLENCE.</span>

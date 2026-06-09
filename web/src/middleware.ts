@@ -1,6 +1,14 @@
-import { clerkMiddleware } from '@clerk/nextjs/server';
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
-export default clerkMiddleware();
+const isPublicRoute = createRouteMatcher([
+  '/api/webhooks/lemonsqueezy',
+]);
+
+export default clerkMiddleware(async (_auth, req) => {
+  if (isPublicRoute(req)) {
+    return;
+  }
+});
 
 export const config = {
   matcher: [

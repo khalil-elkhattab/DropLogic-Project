@@ -57,9 +57,14 @@ export async function POST(request: Request) {
       error: error.message,
       script_engine: {
         selected_angle: "fallback",
+        hook_options: [
+          "If you want to scale your product, you need to look at this.",
+          "Stop scrolling — this product is going viral.",
+          "Nobody told me about this until today.",
+        ],
         hook: "If you want to scale your product, you need to look at this.",
         body: "This product is trending everywhere right now because it solves the biggest problem drop shippers face.",
-        cta: "Click below to lock in your special 50% off discount today."
+        cta: "Get 50% off today only — tap the link in bio before we sell out.",
       }
     }, { status: 500 });
   }

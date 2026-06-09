@@ -1,12 +1,51 @@
 "use client";
-import React, { useState, useRef, useEffect } from 'react';
-import { UserButton } from "@clerk/clerk-react";
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { UserButton, useUser } from "@clerk/clerk-react";
 import { useRouter, useSearchParams } from 'next/navigation';
+import DropLogicLogo from '@/components/brand/DropLogicLogo';
+import ScriptEditor, {
+  createDefaultScript,
+  getActiveHook,
+  type AdScript,
+} from '@/components/studio/ScriptEditor';
+import QuotaPaywall from '@/components/studio/QuotaPaywall';
+import { getBackendUrl, resolveBakedVideoUrl } from '@/lib/backend';
+import {
+  FREE_TIER_PAYWALL_MESSAGE,
+  isFreeTierLimitReached,
+  type VideoQuota,
+} from '@/lib/quota';
+
+function parseScriptEngine(engine: Record<string, unknown>, productName: string): AdScript {
+  const defaults = createDefaultScript(productName);
+  const hookOptionsRaw = engine.hook_options;
+
+  let hookOptions: [string, string, string] = defaults.hookOptions;
+  if (Array.isArray(hookOptionsRaw) && hookOptionsRaw.length > 0) {
+    const hooks = hookOptionsRaw.map((h) => String(h).trim()).filter(Boolean);
+    while (hooks.length < 3) {
+      hooks.push(hooks[hooks.length - 1] ?? defaults.hookOptions[hooks.length]);
+    }
+    hookOptions = [hooks[0], hooks[1], hooks[2]];
+  } else if (typeof engine.hook === 'string' && engine.hook.trim()) {
+    hookOptions = [engine.hook, hookOptions[1], hookOptions[2]];
+  }
+
+  return {
+    hookOptions,
+    selectedHookIndex: 0,
+    body: typeof engine.body === 'string' && engine.body.trim() ? engine.body : defaults.body,
+    cta: typeof engine.cta === 'string' && engine.cta.trim() ? engine.cta : defaults.cta,
+  };
+}
 
 export default function AIStudioPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user, isLoaded } = useUser();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [videoQuota, setVideoQuota] = useState<VideoQuota | null>(null);
+  const [quotaLoading, setQuotaLoading] = useState(true);
   
   // استقبال رابط الفيديو الممرر ديناميكياً من خيار المستخدم في صفحة النتائج
   const incomingVideoUrl = searchParams.get('videoUrl') || "https://www.w3schools.com/html/mov_bbb.mp4";
@@ -20,12 +59,45 @@ export default function AIStudioPage() {
   const [aspectRatio, setAspectRatio] = useState('reels'); // 'reels' (9:16) | 'desktop' (16:9) | 'square' (1:1)
   const [selectedHook, setSelectedHook] = useState('problem');
   const [logoImage, setLogoImage] = useState<string | null>(null);  
-  const [customText, setCustomText] = useState('This viral Amazon gadget completely transformed my late-night setup. Get 50% off tonight only.');
+  const [adScript, setAdScript] = useState<AdScript>(() => createDefaultScript(incomingTitle));
   const [selectedVoice, setSelectedVoice] = useState('premium_male');
   const [bgMusic, setBgMusic] = useState('tiktok_trend_01');
+  const [antiBanFilter, setAntiBanFilter] = useState(true);
+  const [burnCaptions, setBurnCaptions] = useState(true);
   const [isRendering, setIsRendering] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+
+  const loadVideoQuota = useCallback(async () => {
+    if (!user?.id) {
+      setVideoQuota(null);
+      setQuotaLoading(false);
+      return;
+    }
+
+    setQuotaLoading(true);
+    try {
+      const response = await fetch('/api/video-studio/usage', { cache: 'no-store' });
+      if (response.ok) {
+        const data: VideoQuota = await response.json();
+        setVideoQuota(data);
+      }
+    } catch (error) {
+      console.error('[-] Failed to load video quota:', error);
+    } finally {
+      setQuotaLoading(false);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (isLoaded) {
+      loadVideoQuota();
+    }
+  }, [isLoaded, loadVideoQuota]);
+
+  const freeLimitReached = isFreeTierLimitReached(videoQuota);
+  const generateDisabled =
+    isRendering || isGeneratingScript || quotaLoading || freeLimitReached || !user?.id;
 
   // دالة جلب النص الذكي المخصص عبر خادم FastAPI الموحد والمباشر
   const fetchAiScriptAngle = async (angleKey: string) => {
@@ -36,14 +108,14 @@ export default function AIStudioPage() {
     if (angleKey === "scarcity") backendAngleName = "urgency";
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/video-studio/generate', {
+      const response = await fetch('/api/video-studio/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product_name: incomingTitle,
           angle: backendAngleName,
-          video_url: currentVideoUrl
-        })
+          video_url: currentVideoUrl,
+        }),
       });
 
       if (!response.ok) {
@@ -52,16 +124,20 @@ export default function AIStudioPage() {
 
       const resData = await response.json();
       
-      if (resData?.success && resData?.script_engine) {
-        const engine = resData.script_engine;
-        const fullScript = `${engine.hook}\n\n${engine.body}\n\n${engine.cta}`;
-        setCustomText(fullScript);
+      if (resData?.script_engine) {
+        setAdScript(parseScriptEngine(resData.script_engine, incomingTitle));
       }
     } catch (err) {
-      console.error("[-] Error routing directly to FastAPI. Using local fallbacks:", err);
-      if (angleKey === 'problem') setCustomText(`This viral Amazon gadget completely transformed my late-night setup. Get 50% off tonight only for ${incomingTitle}.`);
-      if (angleKey === 'viral') setCustomText(`TikTok made me buy it! 🤫 This is why everyone is obsessed with this ${incomingTitle} right now.`);
-      if (angleKey === 'scarcity') setCustomText(`Stop scrolling! 🚨 Our warehouse is clearing out inventory for ${incomingTitle}. Price drops for the next 4 hours.`);
+      console.error("[-] Error routing script generation. Using local fallbacks:", err);
+      const fallback = createDefaultScript(incomingTitle);
+      if (angleKey === 'viral') {
+        fallback.hookOptions[0] = `TikTok made me buy it — this ${incomingTitle} is everywhere.`;
+      }
+      if (angleKey === 'scarcity') {
+        fallback.hookOptions[0] = `Stop scrolling! Warehouse clearing ${incomingTitle} stock tonight.`;
+        fallback.cta = `Get 50% off ${incomingTitle} today only — link in bio before midnight.`;
+      }
+      setAdScript(fallback);
     } finally {
       setIsGeneratingScript(false);
     }
@@ -85,19 +161,19 @@ export default function AIStudioPage() {
     }
   };
 
-  // 🔥 دالة الـ Bake الاحترافية المعدلة لربط وإرسال وتمرير البيانات الحية لصفحة التنزيل
+  // 🔥 دالة الـ Bake الاحترافية المعدلة لربط وإرسال وتمرير البيانات الحية لصفحة التنزيل بأمان
   const handleStartRender = async () => {
     setIsRendering(true);
     setProgress(0);
 
     // 1. إعداد وتحضير المتغيرات لتتوافق مع خيارات الباكيند الصارمة
-    let backendVoice = "adam";
-    if (selectedVoice === "viral_female") backendVoice = "bella";
-    if (selectedVoice === "deep_uk") backendVoice = "oliver";
+    let backendVoice = "en-US-Male-1"; 
+    if (selectedVoice === "viral_female") backendVoice = "en-US-Female-1";
+    if (selectedVoice === "deep_uk") backendVoice = "en-GB-Male-1";
 
-    let backendMusic = "none";
-    if (bgMusic === "tiktok_trend_01") backendMusic = "lofi-lofi-music-496553";
+    let backendMusic = "lofi";
     if (bgMusic === "tiktok_trend_02") backendMusic = "cyberpunk";
+    if (bgMusic === "none") backendMusic = "none";
 
     // 2. تشغيل العداد الوهمي كجزء جمالي من التصميم أثناء معالجة البيانات من السيرفر
     const progressInterval = setInterval(() => {
@@ -106,21 +182,30 @@ export default function AIStudioPage() {
 
     try {
       // 3. إرسال الطلب الفعلي المليء بالتعديلات الحية إلى الباكيند لطبخ الصوت والميكس
-      const response = await fetch('http://127.0.0.1:8000/api/video-studio/bake', {
+      const response = await fetch(`${getBackendUrl()}/api/video-studio/bake`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product_name: incomingTitle,
           video_url: currentVideoUrl,
-          final_hook: customText.split('\n\n')[0] || customText,
-          final_body: customText.split('\n\n')[1] || "This is a viral product you must see.",
-          final_cta: customText.split('\n\n')[2] || "Click the link below to get yours today.",
+          final_hook: getActiveHook(adScript),
+          final_body: adScript.body,
+          final_cta: adScript.cta,
           selected_voice: backendVoice,
           selected_bg_music: backendMusic,
           watermark_attached: !!logoImage,
-          logo_url: logoImage
-        })
+          video_duration: 10.0,
+          anti_ban_filter: antiBanFilter,
+          burn_captions: burnCaptions,
+          clerk_user_id: user?.id ?? null,
+          email: user?.primaryEmailAddress?.emailAddress ?? null,
+        }),
       });
+
+      if (response.status === 403) {
+        await loadVideoQuota();
+        throw new Error(FREE_TIER_PAYWALL_MESSAGE);
+      }
 
       if (!response.ok) throw new Error("Baking pipeline failed on server side.");
 
@@ -129,23 +214,33 @@ export default function AIStudioPage() {
       clearInterval(progressInterval);
       setProgress(100);
 
-      // 4. تمرير روابط الفيديو والصوت النهائي ومستندات التسويق لصفحة الـ download (publish) بذكاء
+      // 4. تمرير روابط الفيديو والصوت النهائي ومستندات التسويق لصفحة الـ download (publish) بذكاء وبدون خطأ الـ undefined
       if (result && result.success) {
-        const audioUrl = result.master_output.generated_audio_url;
-        const videoUrl = result.master_output.video_stream_url;
-        const marketingCaption = result.marketing_assets.video_caption;
+        await loadVideoQuota();
+        const renderId = result.render_id || "";
+        const videoUrl =
+          result.final_video_url ||
+          (renderId ? resolveBakedVideoUrl(renderId) : "");
+        const marketingCaption = result.marketing_assets?.video_caption || "Amazing Product! ✨";
 
         setTimeout(() => {
           setIsRendering(false);
-          // الانتقال مع تمرير الروابط حية عبر الـ URL Search Params لتقرأها صفحة التنزيل فوراً!
-          router.push(`/dashboard/publish?audioUrl=${encodeURIComponent(audioUrl)}&videoUrl=${encodeURIComponent(videoUrl)}&caption=${encodeURIComponent(marketingCaption)}`);
+          const params = new URLSearchParams({
+            videoUrl,
+            caption: marketingCaption,
+          });
+          if (renderId) params.set('renderId', renderId);
+          router.push(`/dashboard/publish?${params.toString()}`);
         }, 500);
       }
     } catch (error) {
       console.error("[-] Error during video baking pipeline:", error);
       clearInterval(progressInterval);
       setIsRendering(false);
-      alert("Something went wrong while baking the video. Check backend logs.");
+      const message = error instanceof Error ? error.message : '';
+      if (message !== FREE_TIER_PAYWALL_MESSAGE) {
+        alert("Something went wrong while baking the video. Check backend logs.");
+      }
     }
   };
 
@@ -200,11 +295,9 @@ export default function AIStudioPage() {
       </div>
 
       {/* WORKSPACE NAVIGATION */}
-      <nav className="h-14 border-b border-black/[0.08] bg-white/90 backdrop-blur-md flex items-center justify-between px-6 sticky top-0 z-50 relative z-10 select-none">
+      <nav className="h-14 border-b border-black/[0.08] bg-white/90 backdrop-blur-md flex items-center justify-between px-6 sticky top-0 z-50 select-none relative">
         <div className="flex items-center gap-6">
-          <div onClick={() => router.push('/dashboard')} className="text-base font-black tracking-tighter uppercase italic cursor-pointer">
-              DropLogic<span className="text-blue-600">.Studio</span>
-          </div>
+          <DropLogicLogo href="/dashboard" size="sm" suffix="Studio" className="italic" />
           <div className="h-4 w-[1px] bg-black/10 hidden sm:block"></div>
           <div className="hidden sm:flex items-center gap-2 text-[9px] font-mono font-bold text-gray-400 uppercase tracking-widest bg-gray-50 px-2.5 py-0.5 rounded border border-black/[0.03]">
             Status: <span className="text-green-500 animate-pulse">TikTok_Pipeline_Only</span>
@@ -212,22 +305,40 @@ export default function AIStudioPage() {
         </div>
 
         <div className="flex items-center gap-4">
+          {videoQuota && (
+            <div className="hidden md:block text-[9px] font-mono font-bold text-gray-400 uppercase tracking-widest bg-gray-50 px-2.5 py-1 rounded border border-black/[0.03]">
+              Videos:{' '}
+              <span className={freeLimitReached ? 'text-amber-600' : 'text-black'}>
+                {videoQuota.used}/{videoQuota.limit}
+              </span>
+            </div>
+          )}
           <button 
             onClick={() => router.push('/dashboard/results')} 
             className="text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-black transition"
           >
-            ← Back to Intelligence
+            &larr; Back to Intelligence
           </button>
           <button
             onClick={handleStartRender}
-            disabled={isRendering}
-            className={`h-9 px-5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${isRendering ? 'bg-gray-100 text-gray-400 border border-black/5 cursor-not-allowed' : 'bg-black text-white hover:bg-blue-600'}`}
+            disabled={generateDisabled}
+            className={`h-9 px-5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${generateDisabled ? 'bg-gray-100 text-gray-400 border border-black/5 cursor-not-allowed' : 'bg-black text-white hover:bg-blue-600'}`}
           >
             {isRendering ? `Baking ${progress}%` : 'Render & Download'}
           </button>
           <UserButton afterSignOutUrl="/" />
         </div>
       </nav>
+
+      {freeLimitReached && (
+        <div className="relative z-10 px-6 pt-4 max-w-4xl mx-auto w-full">
+          <QuotaPaywall
+            visible={freeLimitReached}
+            used={videoQuota?.used}
+            limit={videoQuota?.limit}
+          />
+        </div>
+      )}
 
       {/* FULL SCREEN PRO EDITOR WORKSPACE */}
       <main className="flex-1 w-full grid grid-cols-1 lg:grid-cols-12 gap-0 relative z-10 overflow-hidden">
@@ -256,7 +367,7 @@ export default function AIStudioPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">AI Optimized Angles</label>
+              <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">AI Optimized Angles</div>
               {[
                 { id: 'problem', title: 'Problem-Solving Angle', desc: 'Focuses on pain points and room transformation.' },
                 { id: 'viral', title: 'TikTok Viral Hook', desc: 'Uses social proof and organic trends style.' },
@@ -282,15 +393,11 @@ export default function AIStudioPage() {
               ))}
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Live Script Customization</label>
-              <textarea
-                value={customText}
-                onChange={(e) => setCustomText(e.target.value)}
-                rows={6}
-                className="w-full p-4 rounded-xl border border-black/[0.06] bg-white text-xs font-medium leading-relaxed focus:outline-none focus:border-black transition resize-none"
-              />
-            </div>
+            <ScriptEditor
+              script={adScript}
+              disabled={isGeneratingScript}
+              onChange={setAdScript}
+            />
           </div>
         </section>
 
@@ -375,13 +482,19 @@ export default function AIStudioPage() {
                 )}
               </div>
 
-              <div className="bg-black/70 backdrop-blur-md border border-white/10 p-3.5 rounded-xl z-10 shadow-xl max-w-sm mx-auto w-full relative">
-                <p className="text-[11px] font-bold leading-snug tracking-tight text-yellow-300 whitespace-pre-line">
-                  "{customText || "Your subtitle text placeholder..."}"
+              <div className="bg-black/70 backdrop-blur-md border border-white/10 p-3.5 rounded-xl z-10 shadow-xl max-w-sm mx-auto w-full relative space-y-2">
+                <p className="text-[11px] font-bold leading-snug tracking-tight text-yellow-300 line-clamp-2">
+                  &ldquo;{getActiveHook(adScript)}&rdquo;
                 </p>
-                <div className="mt-2 flex items-center justify-between text-[7px] font-mono text-gray-400 uppercase tracking-widest border-t border-white/5 pt-1.5">
+                <p className="text-[9px] font-medium leading-snug text-green-300 line-clamp-2 opacity-90">
+                  {adScript.body}
+                </p>
+                <p className="text-[9px] font-bold leading-snug text-yellow-200 line-clamp-1">
+                  {adScript.cta}
+                </p>
+                <div className="flex items-center justify-between text-[7px] font-mono text-gray-400 uppercase tracking-widest border-t border-white/5 pt-1.5">
                   <span>Voice: {selectedVoice}</span>
-                  <span className="text-blue-500">Auto Captions Synced</span>
+                  <span className="text-blue-500">Captions Synced</span>
                 </div>
               </div>
             </div>
@@ -409,7 +522,7 @@ export default function AIStudioPage() {
 
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">AI Voice Cloning (Speech)</label>
+              <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">AI Voice Cloning (Speech)</div>
               <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)} className="w-full h-11 px-3 rounded-xl bg-white border border-black/[0.06] font-bold text-xs cursor-pointer focus:outline-none focus:border-black transition">
                 <option value="premium_male">Adam (Premium Energetic Male - US)</option>
                 <option value="viral_female">Bella (TikTok Trending Female - US)</option>
@@ -418,7 +531,7 @@ export default function AIStudioPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Trending E-com BG Music</label>
+              <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Trending E-com BG Music</div>
               <select value={bgMusic} onChange={(e) => setBgMusic(e.target.value)} className="w-full h-11 px-3 rounded-xl bg-white border border-black/[0.06] font-bold text-xs cursor-pointer focus:outline-none focus:border-black transition">
                 <option value="tiktok_trend_01">Lofi Chill Beats (High Conversion)</option>
                 <option value="tiktok_trend_02">Cyberpunk Upbeat Synth</option>
@@ -429,8 +542,96 @@ export default function AIStudioPage() {
 
           <div className="h-[1px] bg-black/[0.05]"></div>
 
+          <div className="rounded-xl border border-amber-500/25 bg-amber-50/40 p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-widest text-amber-600 block mb-1">
+                  // Auto Burned-In Captions
+                </div>
+                <p className="text-[11px] font-bold text-black leading-snug">
+                  TikTok / Hormozi style subtitles
+                </p>
+                <p className="text-[10px] text-gray-500 leading-relaxed mt-1">
+                  Syncs your hook, body, and CTA to the voiceover — bold yellow &amp; green text with black outline, baked into the final MP4.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={burnCaptions}
+                aria-label="Auto burned-in captions"
+                onClick={() => setBurnCaptions((on) => !on)}
+                className={`relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 ${
+                  burnCaptions ? 'bg-amber-500' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${
+                    burnCaptions ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            {burnCaptions && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {['bold outline', 'lower-third', 'hook → body → cta'].map((tag) => (
+                  <span
+                    key={tag}
+                    className="text-[8px] font-mono font-bold uppercase tracking-wider text-amber-800 bg-white border border-amber-200/60 px-2 py-0.5 rounded"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-blue-600/20 bg-blue-50/50 p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-widest text-blue-600 block mb-1">
+                  // Anti-Ban Smart Filter
+                </div>
+                <p className="text-[11px] font-bold text-black leading-snug">
+                  Uniquify video for TikTok
+                </p>
+                <p className="text-[10px] text-gray-500 leading-relaxed mt-1">
+                  Mirrors, micro-speed shifts, and color grading to bypass duplicate-content detection.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={antiBanFilter}
+                aria-label="Anti-Ban Smart Filter"
+                onClick={() => setAntiBanFilter((on) => !on)}
+                className={`relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 ${
+                  antiBanFilter ? 'bg-blue-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${
+                    antiBanFilter ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            {antiBanFilter && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {['hflip', 'setpts 1.03', 'atempo 0.97', 'color grade'].map((tag) => (
+                  <span
+                    key={tag}
+                    className="text-[8px] font-mono font-bold uppercase tracking-wider text-blue-700 bg-white border border-blue-200/60 px-2 py-0.5 rounded"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1.5">
-            <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Overlay Watermark / Brand Logo</label>
+            <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Overlay Watermark / Brand Logo</div>
             <input type="file" accept="image/*" ref={fileInputRef} onChange={handleLogoUpload} className="hidden" />
             <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-11 px-4 rounded-xl bg-white border border-black/[0.06] border-dashed font-bold text-xs hover:bg-black hover:text-white transition text-center flex items-center justify-center gap-2 shadow-sm">
               {logoImage ? "🔄 Change Uploaded Logo" : "📤 Upload Brand Logo (.PNG)"}
@@ -440,13 +641,23 @@ export default function AIStudioPage() {
             </p>
           </div>
 
-          <div className="pt-4">
+          <div className="pt-4 space-y-3">
+            <p className="text-[9px] font-mono text-gray-400 text-center uppercase tracking-widest">
+              {freeLimitReached
+                ? 'Upgrade to continue generating'
+                : 'Edit script above, then generate voice'}
+            </p>
             <button
+              type="button"
               onClick={handleStartRender}
-              disabled={isRendering}
-              className={`w-full h-12 rounded-xl font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] shadow-md ${isRendering ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-black/5' : 'bg-black text-white hover:bg-blue-600 shadow-blue-600/10'}`}
+              disabled={generateDisabled}
+              className={`w-full h-12 rounded-xl font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] shadow-md ${generateDisabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-black/5' : 'bg-black text-white hover:bg-blue-600 shadow-blue-600/10'}`}
             >
-              {isRendering ? 'Processing...' : 'Bake Final Video'}
+              {isRendering
+                ? 'Processing...'
+                : freeLimitReached
+                  ? 'Limit Reached'
+                  : 'Generate AI Voice & Bake'}
             </button>
           </div>
         </section>

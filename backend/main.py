@@ -2,7 +2,11 @@ import os
 import random
 import json
 import httpx  
-from fastapi import FastAPI, HTTPException, Query, APIRouter
+import re
+import asyncio
+import subprocess
+import time
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -11,44 +15,34 @@ from fastapi.staticfiles import StaticFiles
 from typing import Optional
 from groq import Groq
 
-# تحميل المتغيرات البيئية من ملف .env إن وجد
+# 1. Load environment variables from .env file
 load_dotenv()
 
-# استيراد وحدة الـ Scraper لجمع أصول الميديا والفيديوهات
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# Import media asset scraper module
 try:
     from scrapper import fetch_all_platforms_assets
 except ImportError:
-    # دالة بديلة في حال عدم العثور على الملف محلياً أثناء الفحص
+    # Fallback function to safeguard local server testing
     async def fetch_all_platforms_assets(clean_input): return [], ""
 
-# استيراد دالات معالجة الصوت من المحرك الجديد
-try:
-    from audio_processor import generate_voice_over, mix_voice_and_background
-except ImportError:
-    # دالات بديلة لحماية السيرفر من الانهيار أثناء غياب ملفات الصوت
-    def generate_voice_over(text, voice): 
-        os.makedirs("static/outputs", exist_ok=True)
-        dummy_path = "static/outputs/dummy_voice.mp3"
-        if not os.path.exists(dummy_path):
-            with open(dummy_path, "wb") as f:
-                f.write(b"\x00" * 1000)  # ملف وهمي فارغ لحماية المعالجة
-        return dummy_path
-
-    def mix_voice_and_background(voice_path, bg_music_type, output_filename): 
-        os.makedirs("static/outputs", exist_ok=True)
-        dummy_mix = f"static/outputs/{output_filename}.mp3"
-        if not os.path.exists(dummy_mix):
-            with open(dummy_mix, "wb") as f:
-                f.write(b"\x00" * 1000)
-        return dummy_mix
+# 🟢 STRICT AUDIO ENGINE IMPORT (No more hidden fallbacks / No more warnings)
+from audio_processor import generate_voice_over, mix_voice_and_background
+from caption_engine import generate_burned_captions
+from usage_quota import QuotaExceededError, enforce_bake_quota, record_successful_bake
+from cleanup_assets import cleanup_bake_temp_assets
+from ad_history import fetch_generated_ads, save_generated_ad
+from product_insights import build_active_competitors, build_financials, build_sales_trend
 
 app = FastAPI(
-    title="DropLogic Neural Content Pipeline (Enterprise Cloud Edition)",
-    description="محرك خلفي متكامل، يجمع بين تكشيط المنتجات ومحرك توليد السكريبتات الذكي ومدعوم بـ Shotstack Cloud لطبخ الفيديوهات سحابياً",
-    version="3.5.0"
+    title="DropLogic Neural Content Pipeline (Local Server Edition)",
+    description="Integrated backend engine executing internal FFmpeg video baking locally on DigitalOcean.",
+    version="4.2.0"
 )
 
-# 🌐 إعدادات الـ CORS الكاملة لتخطي حظر المتصفحات للمنافذ المحلية والأجنبية
+# CORS middleware adjustments to bypass browser restrictions
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -57,22 +51,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# التأكد من إنشاء وتفعيل المجلدات الثابتة لخدمة الصوتيات المنتجة مؤقتاً للفرونتيند والسحابة
-os.makedirs("static/outputs", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 🛠️ تحديد المسارات المطلقة لضمان ثبات الملفات على سيرفرات Linux
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+OUTPUTS_DIR = os.path.join(STATIC_DIR, "outputs")
 
-# 💾 مخزن الكاش المؤقت للمخرجات النهائية لعمليات البحث
+# إنشاء المجلدات إذا لم تكن موجودة
+os.makedirs(OUTPUTS_DIR, exist_ok=True)
+
+# ربط المجلد الاستاتيكي باستخدام المسار المطلق الشامل
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# Runtime storage for system caching and tracking local rendering jobs
 COMPUTED_CACHE = {}
+RENDER_JOBS = {}  
 
-# 🔒 جلب مفاتيح الـ API من بيئة النظام
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-SHOTSTACK_API_KEY = os.getenv("SHOTSTACK_KEY")
+# Server deployment target public URL mapping
+SERVER_PUBLIC_URL = os.getenv("SERVER_PUBLIC_URL", "http://164.90.235.14:8000").rstrip('/')
 
-# عنوان الدومين الخاص بسيرفرك ليقوم Shotstack بسحب ملف الصوت منه (استخدم رابط Ngrok أو الدومين الحقيقي)
-SERVER_PUBLIC_URL = os.getenv("SERVER_PUBLIC_URL", "http://localhost:8000")
-
-# تهيئة عميل Groq بشكل آمن ومحمي
+# Securely initialize the Groq client instance
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 class ProductRequest(BaseModel):
@@ -84,7 +81,7 @@ class StudioScriptRequest(BaseModel):
     angle: str           
     video_url: str = "" 
 
-# 🎛️ هيكل البيانات المطور ليعطيك مرونة كاملة في التحكم بكل متغيرات الفيديو إعلانيًا
+# Main parameters structure maintained strictly for flawless Frontend integration compatibility
 class VideoBakeRequest(BaseModel):
     product_name: str         
     video_url: str            
@@ -96,19 +93,18 @@ class VideoBakeRequest(BaseModel):
     watermark_attached: bool  
     logo_url: Optional[str] = None 
     
-    # ⚙️ المتغيرات الإعلانية الحرة المضافة للمرونة الكاملة (مع قيم افتراضية ذكية)
-    video_duration: Optional[float] = 15.0        # طول الإعلان الإجمالي بالثواني (يجب أن يطابق طول خامات الفيديو المستخدمة)
-    video_scale: Optional[float] = 0.9            # نسبة تصغير كليب الواجهة لكسر البصمة الرقمية
-    camera_effect: Optional[str] = "zoomIn"       # نوع حركة كليب الواجهة (zoomIn, zoomInSlow, slideLeft...)
-    bg_camera_effect: Optional[str] = "zoomInSlow" # نوع حركة فيديو الخلفية المضببة
-    audio_volume: Optional[float] = 1.0           # مستوى صوت الإعلان النهائي
+    video_duration: Optional[float] = 15.0        
+    video_scale: Optional[float] = 0.9            
+    camera_effect: Optional[str] = "zoomIn"       
+    bg_camera_effect: Optional[str] = "zoomInSlow" 
+    audio_volume: Optional[float] = 1.0
+    anti_ban_filter: bool = False
+    burn_captions: bool = True
+    clerk_user_id: Optional[str] = None
+    email: Optional[str] = None
 
 
 def analyze_text_with_real_ai(live_scraped_text: str, keyword: str) -> dict:
-    """
-    محرك التحليل النصي والذكاء الاصطناعي البديل لحساب مقاييس 
-    المنتج والمنافسين بناءً على النصوص المجمعة من تيك توك.
-    """
     logic_score = random.randint(80, 95)
     sentiment_score = random.randint(70, 92)
     saturation_score = random.randint(25, 60)
@@ -144,11 +140,73 @@ def analyze_text_with_real_ai(live_scraped_text: str, keyword: str) -> dict:
         ]
     }
 
-# ----------------------------------------------------------------------
-# 1. محرك تحليل المنتجات وتكشيط البيانات (Product Mining)
-# ----------------------------------------------------------------------
 
-@app.post("/api/run-analysis", summary="تحليل المنتج واستخراج أصول الميديا الحية")
+def clean_and_parse_json(raw_text: str) -> dict:
+    raw_text = raw_text.strip()
+    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    if match:
+        raw_text = match.group(0)
+    return json.loads(raw_text)
+
+
+def normalize_script_layers(script_layers: dict, product_name: str) -> dict:
+    """Normalize LLM output into hook_options (3), body, and cta."""
+    product_name = product_name or "this product"
+    default_hooks = [
+        f"Stop scrolling — this {product_name} changes everything.",
+        f"Nobody talks about this {product_name} hack.",
+        f"I wish I found this {product_name} sooner.",
+    ]
+
+    hook_options = script_layers.get("hook_options")
+    if isinstance(hook_options, list) and hook_options:
+        hooks = [str(hook).strip() for hook in hook_options if str(hook).strip()]
+        while len(hooks) < 3:
+            hooks.append(hooks[-1] if hooks else default_hooks[len(hooks)])
+        hooks = hooks[:3]
+    else:
+        single_hook = str(script_layers.get("hook", default_hooks[0])).strip() or default_hooks[0]
+        hooks = [
+            single_hook,
+            f"POV: you finally found the perfect {product_name}.",
+            f"This is why everyone is buying {product_name} right now.",
+        ]
+
+    body = str(script_layers.get("body", "")).strip() or (
+        f"This viral {product_name} solves your biggest daily pain points instantly. "
+        "Premium quality without the premium markup."
+    )
+    cta = str(script_layers.get("cta", "")).strip() or (
+        f"Get 50% off {product_name} today only — tap the link in bio before we sell out."
+    )
+
+    return {
+        "hook_options": hooks,
+        "body": body,
+        "cta": cta,
+    }
+
+
+def build_script_engine_response(product_name: str, video_url: str, angle: str, script_layers: dict) -> dict:
+    normalized = normalize_script_layers(script_layers, product_name)
+    return {
+        "success": True,
+        "product_name": product_name,
+        "video_url": video_url,
+        "script_engine": {
+            "selected_angle": angle,
+            "hook_options": normalized["hook_options"],
+            "hook": normalized["hook_options"][0],
+            "body": normalized["body"],
+            "cta": normalized["cta"],
+        },
+    }
+
+
+# ----------------------------------------------------------------------
+# 1. Product Mining Engine
+# ----------------------------------------------------------------------
+@app.post("/api/run-analysis", summary="Analyze product and extract live media assets")
 async def analyze_pipeline(request: ProductRequest):
     raw_input = request.keyword or request.target_input
     
@@ -185,6 +243,10 @@ async def analyze_pipeline(request: ProductRequest):
             "phrases": ["Highly demanded item on global market feeds right now."]
         }
 
+    financials = build_financials(clean_input)
+    sales_trend = build_sales_trend()
+    active_competitors = build_active_competitors(clean_input)
+
     response_payload = {
         "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
         "product_name": clean_input,
@@ -192,11 +254,14 @@ async def analyze_pipeline(request: ProductRequest):
             "logic_score": real_ai_results.get("logic_score", "8.5"),
             "sentiment": real_ai_results.get("sentiment", "78%"),
             "saturation": real_ai_results.get("saturation", "Medium"),
-            "net_margin": real_ai_results.get("net_margin", "35%")
+            "net_margin": f"{financials['net_profit_margin_pct']:.1f}%",
         },
-        "intercepted_stores": real_ai_results.get("competitors", []),
+        "financials": financials,
+        "sales_trend": sales_trend,
+        "active_competitors": active_competitors,
+        "intercepted_stores": active_competitors or real_ai_results.get("competitors", []),
         "audience_phrases": real_ai_results.get("phrases", ["No trends returned from engine pipeline yet."]),
-        "raw_assets": video_assets
+        "raw_assets": video_assets,
     }
     
     COMPUTED_CACHE[clean_input] = response_payload
@@ -204,12 +269,11 @@ async def analyze_pipeline(request: ProductRequest):
 
 
 # ----------------------------------------------------------------------
-# 2. استوديو النصوص المطور والمقاوم للأخطاء (Hybrid Groq & OpenRouter Engine)
+# 2. Hybrid Groq & OpenRouter Script Studio Engine
 # ----------------------------------------------------------------------
-
 video_studio_router = APIRouter(prefix="/api/video-studio", tags=["Video Studio"])
 
-@video_studio_router.post("/generate", summary="توليد السيناريوهات عبر Groq أو OpenRouter")
+@video_studio_router.post("/generate", summary="Generate script layers via Groq or OpenRouter")
 async def generate_ai_script_layers(request: StudioScriptRequest):
     if not request.product_name:
         raise HTTPException(status_code=400, detail="Product name cannot be empty")
@@ -218,22 +282,28 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
     print(f"\n[🧠 AI ENGINE] Spawning generation worker for: {request.product_name} | Angle: {clean_angle}")
     
     base_instructions = f"""
-    You are a professional TikTok and Meta e-commerce copywriter.
+    You are a professional TikTok and Meta e-commerce copywriter for Western dropshippers.
     Create a high-converting English ad script for the product: "{request.product_name}".
-    You MUST output ONLY a valid JSON object with exactly three keys: "hook", "body", and "cta".
+
+    You MUST output ONLY a valid JSON object with exactly these keys:
+    - "hook_options": an array of exactly 3 distinct strings. Each hook must be punchy, spoken in first person,
+      under 14 words, and engineered to grab attention in the FIRST 3 SECONDS on TikTok. No numbering or bullets inside strings.
+    - "body": a string with 2-3 short sentences covering the main product benefits, transformation, and social proof.
+    - "cta": a string with a strong conversion closer including urgency (example pattern: "Get 50% off today only at the link in bio").
+
     Do not include any introduction, markdown formatting, backticks, or text outside the JSON block.
     """
 
     if "problem" in clean_angle or "solve" in clean_angle:
-        angle_prompt = f"{base_instructions}\nAngle: Problem-Solving.\n- hook: Scroll-stopping transformation narrative.\n- body: Solution details.\n- cta: Drive conversions."
+        angle_prompt = f"{base_instructions}\nAngle: Problem-Solving.\nHooks should expose a painful problem then tease transformation.\nBody should explain the solution.\nCTA should drive immediate purchase."
     elif "viral" in clean_angle or "tiktok" in clean_angle:
-        angle_prompt = f"{base_instructions}\nAngle: TikTok Viral Style.\n- hook: Ultra organic viral narrative.\n- body: Social proof customer review.\n- cta: Drive scarcity action."
+        angle_prompt = f"{base_instructions}\nAngle: TikTok Viral Style.\nHooks should feel organic, like "TikTok made me buy it" energy.\nBody should use social proof.\nCTA should create FOMO."
     elif "urgency" in clean_angle or "fomo" in clean_angle:
-        angle_prompt = f"{base_instructions}\nAngle: Urgency Pitch.\n- hook: Price drop flash alert.\n- body: Intense FOMO sale.\n- cta: Limited time urgency link."
+        angle_prompt = f"{base_instructions}\nAngle: Urgency / Price Drop.\nHooks should flash scarcity or warehouse clearing.\nBody should intensify the sale.\nCTA must include a deadline."
     elif "ugc" in clean_angle:
-        angle_prompt = f"{base_instructions}\nAngle: User Generated Content (UGC).\n- hook: Authentic native user reaction and initial shock.\n- body: Practical everyday benefits.\n- cta: Direct shop link prompt."
+        angle_prompt = f"{base_instructions}\nAngle: User Generated Content (UGC).\nHooks should sound like authentic native reactions.\nBody should list practical everyday benefits.\nCTA should point to shop link."
     else:
-        angle_prompt = f"{base_instructions}\nAngle: Pure Organic Content.\n- hook: Behind-the-scenes packing style.\n- body: Aesthetic product styling.\n- cta: Profile link prompt."
+        angle_prompt = f"{base_instructions}\nAngle: Pure Organic Content.\nHooks should feel behind-the-scenes or discovery-style.\nBody should focus on aesthetic and utility.\nCTA should be soft but direct."
 
     if groq_client:
         try:
@@ -245,22 +315,13 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
                 response_format={"type": "json_object"}
             )
             raw_content = completion.choices[0].message.content.strip()
-            
-            if raw_content.startswith("```"):
-                raw_content = raw_content.split("json")[-1].split("```")[0].strip()
-                
-            script_layers = json.loads(raw_content)
-            return {
-                "success": True,
-                "product_name": request.product_name,
-                "video_url": request.video_url,
-                "script_engine": {
-                    "selected_angle": request.angle,
-                    "hook": script_layers.get("hook", ""),
-                    "body": script_layers.get("body", ""),
-                    "cta": script_layers.get("cta", "")
-                }
-            }
+            script_layers = clean_and_parse_json(raw_content)
+            return build_script_engine_response(
+                request.product_name,
+                request.video_url,
+                request.angle,
+                script_layers,
+            )
         except Exception as groq_err:
             print(f"[⚠️ GROQ EXCEPTION] Error: {groq_err}. Trying OpenRouter Fallback...")
 
@@ -280,236 +341,394 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
             }
             async with httpx.AsyncClient() as client:
                 response = await client.post(openrouter_url, headers=headers, json=payload, timeout=25.0)
-                ai_response_data = response.json()
-                
-            raw_ai_json_text = ai_response_data['choices'][0]['message']['content'].strip()
-            
-            if raw_ai_json_text.startswith("```"):
-                raw_ai_json_text = raw_ai_json_text.split("json")[-1].split("```")[0].strip()
-                
-            script_layers = json.loads(raw_ai_json_text)
-            return {
-                "success": True,
-                "product_name": request.product_name,
-                "video_url": request.video_url,
-                "script_engine": {
-                    "selected_angle": request.angle,
-                    "hook": script_layers.get("hook", ""),
-                    "body": script_layers.get("body", ""),
-                    "cta": script_layers.get("cta", "")
-                }
-            }
+                if response.status_code == 200:
+                    ai_response_data = response.json()
+                    raw_ai_json_text = ai_response_data['choices'][0]['message']['content'].strip()
+                    script_layers = clean_and_parse_json(raw_ai_json_text)
+                    return build_script_engine_response(
+                        request.product_name,
+                        request.video_url,
+                        request.angle,
+                        script_layers,
+                    )
         except Exception as or_err:
             print(f"[-] OpenRouter Fallback Failed: {or_err}")
 
-    return {
-        "success": False,
-        "product_name": request.product_name,
-        "video_url": request.video_url,
-        "script_engine": {
-            "selected_angle": request.angle,
-            "hook": f"If you want to scale your {request.product_name}, you need to look at this.",
-            "body": f"This trending item is built to solve your biggest daily problems instantly.",
-            "cta": "Click below to lock in your special 50% discount today."
+    return build_script_engine_response(
+        request.product_name,
+        request.video_url,
+        request.angle,
+        {},
+    )
+
+
+# ----------------------------------------------------------------------
+# 🛠️ Asynchronous Local Processing Thread for FFmpeg Video Baking
+# ----------------------------------------------------------------------
+ANTI_BAN_VIDEO_FILTER = (
+    "hflip,setpts=1.03*PTS,eq=contrast=1.05:brightness=0.02:saturation=1.1"
+)
+ANTI_BAN_AUDIO_FILTER = "atempo=0.97"
+
+
+def _escape_subtitles_path(path: str) -> str:
+    normalized = os.path.abspath(path).replace('\\', '/')
+    return normalized.replace(':', r'\:')
+
+
+def _build_video_filter(anti_ban_filter: bool, subtitle_path: str | None) -> str | None:
+    filters: list[str] = []
+
+    if anti_ban_filter:
+        filters.append(ANTI_BAN_VIDEO_FILTER)
+
+    if subtitle_path and os.path.exists(subtitle_path):
+        filters.append(f"subtitles={_escape_subtitles_path(subtitle_path)}")
+
+    if not filters:
+        return None
+
+    return ','.join(filters)
+
+
+def run_local_ffmpeg_bake(
+    video_input_path: str,
+    audio_input_path: str,
+    output_video_path: str,
+    duration: int,
+    job_id: str,
+    anti_ban_filter: bool = False,
+    subtitle_path: str | None = None,
+):
+    try:
+        print(f"[🎬 FFmpeg PROCESS] Starting local render engine for job: {job_id}")
+        if anti_ban_filter:
+            print("[🛡️ ANTI-BAN] Applying hflip + micro-speed + color-grade uniquification filters")
+        if subtitle_path:
+            print(f"[💬 CAPTIONS] Burning TikTok-style captions from: {subtitle_path}")
+
+        command = [
+            'ffmpeg', '-y',
+            '-i', video_input_path,
+            '-i', audio_input_path,
+            '-map', '0:v',
+            '-map', '1:a',
+        ]
+
+        video_filter = _build_video_filter(anti_ban_filter, subtitle_path)
+        if video_filter:
+            command.extend(['-vf', video_filter])
+
+        if anti_ban_filter:
+            command.extend(['-af', ANTI_BAN_AUDIO_FILTER])
+
+        command.extend([
+            '-c:v', 'libx264',
+            '-profile:v', 'main',
+            '-level:v', '4.0',
+            '-c:a', 'aac',
+            '-shortest',
+            '-t', str(duration),
+            '-pix_fmt', 'yuv420p',
+            output_video_path,
+        ])
+        
+        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        if process.returncode == 0:
+            print(f"[🟢 FFmpeg SUCCESS] Rendering finished perfectly for job: {job_id}")
+            RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path}
+        else:
+            print(f"[🔴 FFmpeg FAIL] FFmpeg non-zero output: {process.stderr}")
+            RENDER_JOBS[job_id] = {"status": "failed", "error": process.stderr}
+            
+    except Exception as ffmpeg_err:
+        print(f"[🚨 FFmpeg EXCEPTION] Critical error: {str(ffmpeg_err)}")
+        RENDER_JOBS[job_id] = {"status": "failed", "error": str(ffmpeg_err)}
+
+
+# ----------------------------------------------------------------------
+# 📌 Local Bake Engine (معدل بالتزامن الكامل لإجبار الفرونت إند على الانتظار)
+# ----------------------------------------------------------------------
+@video_studio_router.get("/usage", summary="Return current video bake quota for a signed-in user")
+async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional[str] = Query(None)):
+    try:
+        from usage_quota import evaluate_quota
+
+        status = await evaluate_quota(clerk_user_id, email)
+        remaining = max(status.limit - status.used, 0)
+        return {
+            "success": True,
+            "plan_status": status.plan_status,
+            "limit": status.limit,
+            "used": status.used,
+            "remaining": remaining,
+            "allowed": status.allowed,
+            "period": status.period,
+            "message": status.message,
         }
-    }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unable to fetch usage quota: {exc}") from exc
 
 
-# ----------------------------------------------------------------------
-# 📌 محرك الـ Cloud Bake السحابي البارامتري بالكامل (The Fully Parametric Engine) 🎬🎧
-# ----------------------------------------------------------------------
-@video_studio_router.post("/bake", summary="طبخ وهندسة الأصول الإعلانية عبر سحابة Shotstack لمنع انهيار السيرفر وتخطي حظر تيك توك")
-async def start_video_baking_pipeline(request: VideoBakeRequest):
-    if not SHOTSTACK_API_KEY:
-        raise HTTPException(status_code=500, detail="Shotstack API Key is missing in server environment variables.")
+@video_studio_router.post("/bake", summary="Bake marketing assets internally using local server FFmpeg processing")
+async def start_video_baking_pipeline(
+    request: VideoBakeRequest,
+    background_tasks: BackgroundTasks,
+):
     if not request.video_url:
         raise HTTPException(status_code=400, detail="Target raw video source URL cannot be empty.")
 
     try:
-        unique_id = os.urandom(4).hex()
-        print(f"\n[🚀 CLOUD BAKE START] Offloading rendering pipeline for: {request.product_name} | Intended Length: {request.video_duration}s")
+        quota_status = await enforce_bake_quota(request.clerk_user_id, request.email)
+        print(
+            f"[📊 QUOTA] User {request.clerk_user_id} | plan={quota_status.plan_status} "
+            f"| used={quota_status.used}/{quota_status.limit} ({quota_status.period})"
+        )
+    except QuotaExceededError as quota_err:
+        status = quota_err.status
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "quota_exceeded",
+                "message": status.message,
+                "plan_status": status.plan_status,
+                "limit": status.limit,
+                "used": status.used,
+                "period": status.period,
+            },
+        ) from quota_err
 
-        # 1. توليد وهندسة المزيج الصوتي الجديد محلياً أولاً
+    temp_cleanup_paths: list[str] = []
+    output_video_path = ""
+
+    try:
+        unique_id = os.urandom(4).hex()
+        job_id = f"local_bake_{unique_id}"
+        print(f"\n[🚀 LOCAL BAKE START] Initializing rendering pipeline for: {request.product_name}")
+
+        temp_video_filename = f"temp_download_{unique_id}.mp4"
+        local_temp_video_path = os.path.join(OUTPUTS_DIR, temp_video_filename)
+        temp_cleanup_paths.append(local_temp_video_path)
+        
+        print(f"[📥 DOWNLOADER] Pre-downloading full source TikTok asset locally...")
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "*/*"
+        }
+        
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            response = await client.get(request.video_url, headers=headers, timeout=40.0)
+            if response.status_code == 200:
+                with open(local_temp_video_path, "wb") as f:
+                    f.write(response.content)
+                print(f"[🟢 DOWNLOAD SUCCESS] Source video securely stored at: {local_temp_video_path}")
+            else:
+                print(f"[⚠️ PROXY FALLBACK] Direct download code {response.status_code}. Attempting Proxy...")
+                proxy_fallback_url = f"http://127.0.0.1:8000/api/proxy-video?url={httpx.URLEncodedString(request.video_url)}"
+                response_alt = await client.get(proxy_fallback_url, timeout=40.0)
+                if response_alt.status_code == 200:
+                    with open(local_temp_video_path, "wb") as f:
+                        f.write(response_alt.content)
+                else:
+                    raise HTTPException(status_code=400, detail="Unable to safely retrieve or cache the video from TikTok servers.")
+
         full_custom_script = f"{request.final_hook} {request.final_body} {request.final_cta}"
         print(f"[🎙️ AI SYNTHESIS] Generating voice over via internal engine...")
         temp_voice_file = generate_voice_over(full_custom_script, request.selected_voice)
-        
+        temp_cleanup_paths.append(temp_voice_file)
+
         print(f"[🎵 AUDIO MIXER] Merging voice over with background music tracks...")
-        final_audio_path = mix_voice_and_background(
+        mix_voice_and_background(
             voice_path=temp_voice_file,
             bg_music_type=request.selected_bg_music,
             output_filename=f"mix_{unique_id}"
         )
-        audio_filename = os.path.basename(final_audio_path)
         
-        # رابط الملف الصوتي العام على خادمك الذي سيقوم خادم Shotstack بسحبه
-        public_audio_url = f"{SERVER_PUBLIC_URL}/static/outputs/{audio_filename}"
+        final_audio_path = os.path.join(OUTPUTS_DIR, f"mix_{unique_id}.wav")
+        temp_cleanup_paths.append(final_audio_path)
 
-        # 2. بناء الـ Timeline السحابي بالاعتماد بالكامل على المتغيرات الحرة القادمة من الطلب
-        shotstack_payload = {
-            "timeline": {
-                "background": "#000000",
-                "tracks": [
-                    # الطبقة الأولى: تيار الصوت والموسيقى المدمج بالكامل بالتحكم الديناميكي بالصوت
-                    {
-                        "clips": [
-                            {
-                                "asset": {
-                                    "type": "audio",
-                                    "src": public_audio_url,
-                                    "volume": request.audio_volume  # 🔊 متغير ديناميكي لحجم الصوت
-                                },
-                                "start": 0,
-                                "length": request.video_duration  # ⏱️ متغير ديناميكي لطول المقطع
-                            }
-                        ]
-                    },
-                    # الطبقة الثانية: فيديو الواجهة الأمامية (مع الحركات والأبعاد الحرة تماماً)
-                    {
-                        "clips": [
-                            {
-                                "asset": {
-                                    "type": "video",
-                                    "src": request.video_url,
-                                    "volume": 0.0 # كتم صوت الفيديو الأصلي تماماً
-                                },
-                                "start": 0,
-                                "length": request.video_duration,  # ⏱️ متغير ديناميكي لطول المقطع
-                                "fit": "contain",
-                                "scale": request.video_scale,       # 📐 حجم الـ Scale متغير ديناميكي لكسر البصمة الرقمية
-                                "effect": request.camera_effect     # 🎬 نوع حركة الكاميرا متغير ديناميكي
-                            }
-                        ]
-                    },
-                    # الطبقة الثالثة: الـ Blurred background الذكي لتغطية الفراغات بالأبعاد العمودية
-                    {
-                        "clips": [
-                            {
-                                "asset": {
-                                    "type": "video",
-                                    "src": request.video_url,
-                                    "volume": 0.0
-                                },
-                                "start": 0,
-                                "length": request.video_duration,  # ⏱️ متغير ديناميكي لطول المقطع
-                                "fit": "crop", # جعل الفيديو يملأ كامل أبعاد الخلفية
-                                "effect": request.bg_camera_effect  # 🎬 نوع حركة الخلفية متغير ديناميكي
-                            }
-                        ]
-                    }
-                ]
-            },
-            "output": {
-                "format": "mp4",
-                "resolution": "preview", # الخيار الأكثر استقراراً للحسابات التجريبية وبوابات التطوير
-                "fps": 24
-            }
-        }
+        output_video_filename = f"final_video_{unique_id}.mp4"
+        output_video_path = os.path.join(OUTPUTS_DIR, output_video_filename)
+        caption_ass_path = os.path.join(OUTPUTS_DIR, f"captions_{unique_id}.ass")
+        temp_cleanup_paths.append(caption_ass_path)
 
-        # دمج الشعار أو العلامة مائياً بشكل بارامتري متوافق مع طول الفيديو المختار
-        if request.watermark_attached and request.logo_url:
-            print(f"[🛡️ BRANDING LAYERING] Structuring logo overlay into top cloud layer...")
-            logo_clip = {
-                "asset": {
-                    "type": "image",
-                    "src": request.logo_url
-                },
-                "start": 0,
-                "length": request.video_duration,  # ⏱️ يتوافق تلقائياً مع طول الإعلان المختار ديناميكياً
-                "fit": "none",
-                "scale": 0.15,
-                "position": "topLeft",
-                "offset": {"x": 0.05, "y": -0.05}
-            }
-            # حقن طبقة اللوجو في قمة مصفوفة مسارات الخط الزمني
-            shotstack_payload["timeline"]["tracks"].insert(0, {"clips": [logo_clip]})
+        subtitle_path = None
 
-        # 3. إرسال الطلب إلى بوابة الـ Sandbox في Shotstack للرندرة الفورية المستقرة
-        shotstack_endpoint = "https://api.shotstack.io/edit/stage/render"
-        headers = {
-            "x-api-key": SHOTSTACK_API_KEY,
-            "Content-Type": "application/json"
-        }
+        if request.burn_captions:
+            print("[💬 CAPTION ENGINE] Syncing hook/body/CTA to voiceover timeline...")
+            subtitle_path = generate_burned_captions(
+                hook=request.final_hook,
+                body=request.final_body,
+                cta=request.final_cta,
+                audio_path=final_audio_path,
+                output_path=caption_ass_path,
+                fallback_duration=float(request.video_duration or 15.0),
+            )
+            if subtitle_path:
+                print(f"[🟢 CAPTION ENGINE] ASS subtitle track ready: {subtitle_path}")
+            else:
+                print("[⚠️ CAPTION ENGINE] No caption cues generated — continuing without burned text")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(shotstack_endpoint, json=shotstack_payload, headers=headers, timeout=30.0)
-            
-        if response.status_code not in [200, 201]:
-            print(f"[🚨 SHOTSTACK ERROR FEEDBACK]: {response.text}")
-            raise HTTPException(status_code=500, detail=f"Cloud Rendering gateway rejected payload: {response.text}")
+        RENDER_JOBS[job_id] = {"status": "rendering", "file_path": output_video_path}
+        target_duration = int(request.video_duration) if request.video_duration else 15
+        
+        # 🟢 تعديل الحماية الأكبر: نجعل الركيزة تنتظر انتهاء الـ FFmpeg بالكامل قبل إطلاق الاستجابة
+        print(f"[⏳ Synchronous Wait] Forcing pipeline to hold network thread until FFmpeg finishes perfectly...")
+        await asyncio.to_thread(
+            run_local_ffmpeg_bake,
+            local_temp_video_path,
+            final_audio_path,
+            output_video_path,
+            target_duration,
+            job_id,
+            request.anti_ban_filter,
+            subtitle_path,
+        )
 
-        res_json = response.json()
-        render_id = res_json["response"]["id"]
-        print(f"[🛰️ CLOUD PIPELINE DISPATCHED] Active Render Job ID: {render_id}")
+        # التحقق من أن عملية الرندرة نجحت بالفعل ولم تفشل داخلياً
+        job_result = RENDER_JOBS.get(job_id, {"status": "failed"})
+        if job_result["status"] == "failed":
+            raise HTTPException(status_code=500, detail=f"FFmpeg rendering failed: {job_result.get('error')}")
 
-        # 4. بناء الأصول التسويقية والنصوص الإعلانية لصفحة النشر تلقائياً
+        final_video_url = f"{SERVER_PUBLIC_URL}/static/outputs/{output_video_filename}"
+
+        if request.clerk_user_id:
+            await record_successful_bake(
+                request.clerk_user_id,
+                request.email,
+                job_id,
+                request.product_name,
+            )
+            try:
+                await save_generated_ad(
+                    user_id=request.clerk_user_id,
+                    product_name=request.product_name,
+                    selected_hook=request.final_hook,
+                    video_url=final_video_url,
+                )
+                print(f"[📚 AD HISTORY] Saved generated ad for user {request.clerk_user_id}")
+            except Exception as history_err:
+                print(f"[⚠️ AD HISTORY] Failed to persist ad record: {history_err}")
+
         clean_tags = request.product_name.replace(" ", "").lower()
-        marketing_payload = {
-            "video_caption": f"{request.final_hook} 🤫✨",
-            "primary_ad_copy": f"Stop scrolling! 🚨 Viral {request.product_name} completely flips your setup upside down. Get 50% OFF tonight only. Free Worldwide Shipping included! {request.final_cta}",
-            "trending_hashtags": f"#dropshipping #viralproduct #tiktokmademebuyit #amazonfinds #{clean_tags} #ecommerce"
-        }
+        
+        print(f"[🚀 CONNECTION RELEASED] Video is 100% baked and ready on storage. Responding to Frontend.")
+
+        background_tasks.add_task(
+            cleanup_bake_temp_assets,
+            temp_cleanup_paths,
+            job_id,
+            preserve_paths=[output_video_path],
+        )
 
         return {
             "success": True,
-            "message": "Render job successfully offloaded to Shotstack Cloud. Zero server overhead.",
-            "render_id": render_id,
-            "check_status_url": f"{SERVER_PUBLIC_URL}/api/video-studio/render-status/{render_id}",
-            "marketing_assets": marketing_payload
+            "message": "Render job successfully finished locally on your server. Zero third-party dependencies.",
+            "render_id": job_id,
+            "final_video_url": final_video_url,
+            "check_status_url": f"{SERVER_PUBLIC_URL}/api/video-studio/render-status/{job_id}",
+            "marketing_assets": {
+                "video_caption": f"{request.final_hook} 🤫✨",
+                "primary_ad_copy": f"Stop scrolling! 🚨 Viral {request.product_name} completely flips your setup upside down. Get 50% OFF tonight only. Free Worldwide Shipping included! {request.final_cta}",
+                "trending_hashtags": f"#dropshipping #viralproduct #tiktokmademebuyit #amazonfinds #{clean_tags} #ecommerce"
+            }
         }
 
+    except HTTPException:
+        background_tasks.add_task(
+            cleanup_bake_temp_assets,
+            temp_cleanup_paths,
+            job_id if "job_id" in locals() else "",
+        )
+        raise
     except Exception as e:
         print(f"[🚨 PIPELINE ERROR]: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Baking pipeline failed: {str(e)}")
+        background_tasks.add_task(
+            cleanup_bake_temp_assets,
+            temp_cleanup_paths,
+            job_id if "job_id" in locals() else "",
+        )
+        raise HTTPException(status_code=500, detail=f"Internal Baking pipeline failed: {str(e)}") from e
 
 
 # ----------------------------------------------------------------------
-# 📌 مسار فحص حالة الـ Render وجلب رابط المخرجات النهائي للـ Frontend
+# 📌 Local Rendering Task Tracking Hub
 # ----------------------------------------------------------------------
-@video_studio_router.get("/render-status/{render_id}", summary="فحص حالة الفيديو وجلب الرابط السحابي النهائي فور اكتماله")
+@video_studio_router.get("/render-status/{render_id}", summary="Fetch final cloud video asset link once processing finishes")
 async def get_render_status(render_id: str):
-    if not SHOTSTACK_API_KEY:
-        raise HTTPException(status_code=500, detail="API Key configuration is missing.")
-        
-    shotstack_status_url = f"https://api.shotstack.io/edit/stage/render/{render_id}"
-    headers = {"x-api-key": SHOTSTACK_API_KEY}
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(shotstack_status_url, headers=headers)
-        
-    if response.status_code != 200:
-        raise HTTPException(status_code=400, detail="Unable to fetch status from cloud vendor")
-
-    data = response.json()
-    status = data["response"]["status"]
+    if render_id not in RENDER_JOBS:
+        return {"render_id": render_id, "status": "rendering", "final_video_url": None}
     
-    # جلب رابط الفيديو المستضاف سحابياً مباشرة على AWS S3 التابع لـ Shotstack عند انتهاء المعالجة بنجاح
-    video_url = data["response"].get("url", "") if status == "done" else None
-
-    return {
-        "render_id": render_id,
-        "status": status, # قد تكون (queued, rendering, done, failed)
-        "final_video_url": video_url
-    }
+    job_info = RENDER_JOBS[render_id]
+    
+    if job_info["status"] == "done":
+        filename = os.path.basename(job_info["file_path"])
+        
+        # 🟢 تأمين إضافي دقيق: التحقق من وجود الملف الفعلي وحجمه قبل تسليم الرابط
+        full_file_path = os.path.join(OUTPUTS_DIR, filename)
+        if os.path.exists(full_file_path) and os.path.getsize(full_file_path) > 100 * 1024:
+            final_url = f"{SERVER_PUBLIC_URL}/static/outputs/{filename}"
+            return {"render_id": render_id, "status": "done", "final_video_url": final_url}
+        else:
+            return {"render_id": render_id, "status": "rendering", "final_video_url": None}
+            
+    elif job_info["status"] == "failed":
+        return {
+            "render_id": render_id,
+            "status": "failed",
+            "error": job_info.get("error", "Unknown internal FFmpeg error")
+        }
+    else:
+        return {
+            "render_id": render_id,
+            "status": "rendering",
+            "final_video_url": None
+        }
 
 
 # ----------------------------------------------------------------------
-# 📌 مسار تحميل الملفات الصوتية المنتجة للفرونتيند والسحابة
+# 📌 Master Audio Asset Streaming/Download Station
 # ----------------------------------------------------------------------
-@video_studio_router.get("/download-audio/{filename}", summary="تحميل واستماع ملف الصوت الإعلاني النهائي")
+@video_studio_router.get("/download-audio/{filename}", summary="Download and listen to the final baked audio clip")
 async def download_baked_audio(filename: str):
-    file_path = os.path.abspath(os.path.join("static", "outputs", filename))
-    if os.path.exists(file_path):
-        return FileResponse(file_path, media_type="audio/mp3", filename=filename)
-    raise HTTPException(status_code=404, detail="Audio file not found or has expired")
-
-
-# تسجيل الـ Router الخاص بالاستوديو رسمياً داخل التطبيق الأساسي
-app.include_router(video_studio_router)
+    clean_filename = os.path.basename(filename)
+    file_path = os.path.join(OUTPUTS_DIR, clean_filename)
+    
+    # 🟢 فحص لحماية التحميل من الملفات التالفة أو الفارغة صفر بايت
+    if os.path.exists(file_path) and os.path.getsize(file_path) > 10 * 1024:
+        ext = os.path.splitext(clean_filename)[1].lower()
+        media_type = "audio/wav" if ext == ".wav" else "audio/mp3"
+        return FileResponse(file_path, media_type=media_type, filename=clean_filename)
+    raise HTTPException(status_code=404, detail="Audio file not found or still processing")
 
 
 # ----------------------------------------------------------------------
-# 3. محرك بث وبثق الفيديوهات لتخطي قيود الحظر والـ CORS (Video Proxy Engine)
+# 📌 Generated Ad History API
+# ----------------------------------------------------------------------
+ads_router = APIRouter(prefix="/api/ads", tags=["Ad History"])
+
+
+@ads_router.get("/history", summary="Fetch generated ads for a specific user")
+async def get_user_ad_history(user_id: str = Query(..., description="Clerk user ID")):
+    if not user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    try:
+        ads = await fetch_generated_ads(user_id.strip())
+        return {"success": True, "ads": ads}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unable to load ad history: {exc}") from exc
+
+
+# Initialize global router components
+app.include_router(video_studio_router)
+app.include_router(ads_router)
+
+
+# ----------------------------------------------------------------------
+# 3. Video Proxy Stream Engine (CORS / Hotlinking Bypass)
 # ----------------------------------------------------------------------
 @app.get("/api/proxy-video", summary="Stream external videos safely via Backend to bypass CORS / Hotlinking restrictions")
 async def proxy_video(url: str = Query(..., description="The raw external video source URL")):
@@ -544,6 +763,50 @@ async def proxy_video(url: str = Query(..., description="The raw external video 
             "Accept-Ranges": "bytes"
         }
     )
+
+
+# ----------------------------------------------------------------------
+# 🌐 Direct Main App Endpoints (نسخة ذكية ومحكمة تمنع إظهار الروابط أثناء فترة التعديل)
+# ----------------------------------------------------------------------
+@video_studio_router.get("/published-assets")
+@app.get("/api/video-studio/published-assets")
+@app.get("/published-assets")
+async def get_all_published_assets_safe():
+    if not os.path.exists(OUTPUTS_DIR):
+        return {"success": True, "videos": []}
+        
+    video_files = [f for f in os.listdir(OUTPUTS_DIR) if f.endswith('.mp4') and not f.startswith('temp_download_')]
+    
+    assets = []
+    for filename in video_files:
+        video_path = os.path.join(OUTPUTS_DIR, filename)
+        
+        if os.path.exists(video_path):
+            file_size = os.path.getsize(video_path)
+            time_since_mod = time.time() - os.path.getmtime(video_path)
+            
+            # 🟢 الفحص الاحترافي الفائق: التأكد من تخطي الحجم المبدئي وأن التعديل توقف منذ ثانيتين على الأقل
+            if file_size > 100 * 1024 and time_since_mod > 2:
+                unique_id = filename.replace("final_video_", "").replace(".mp4", "")
+                corresponding_audio = f"mix_{unique_id}.wav"
+                audio_path = os.path.join(OUTPUTS_DIR, corresponding_audio)
+                
+                has_valid_audio = os.path.exists(audio_path) and os.path.getsize(audio_path) > 10 * 1024
+                
+                assets.append({
+                    "video_url": f"{SERVER_PUBLIC_URL}/static/outputs/{filename}",
+                    "audio_url": f"{SERVER_PUBLIC_URL}/static/outputs/{corresponding_audio}" if has_valid_audio else None,
+                    "filename": filename,
+                    "timestamp": os.path.getmtime(video_path)
+                })
+            
+    # ترتيب تصاعدي من الأحدث للأقدم
+    assets.sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    for asset in assets:
+        asset.pop('timestamp', None)
+        
+    return {"success": True, "videos": assets}
 
 
 if __name__ == "__main__":
