@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, Suspense } from 'react';
 import { UserButton, useUser } from "@clerk/clerk-react";
 import { useRouter, useSearchParams } from 'next/navigation';
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
@@ -39,7 +39,7 @@ function parseScriptEngine(engine: Record<string, unknown>, productName: string)
   };
 }
 
-export default function AIStudioPage() {
+function AIStudioContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isLoaded } = useUser();
@@ -664,5 +664,19 @@ export default function AIStudioPage() {
 
       </main>
     </div>
+  );
+}
+
+export default function AIStudioPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-white text-black font-mono flex items-center justify-center text-xs">
+          // Loading studio workspace...
+        </div>
+      }
+    >
+      <AIStudioContent />
+    </Suspense>
   );
 }

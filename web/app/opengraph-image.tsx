@@ -70,7 +70,7 @@ export default function OpenGraphImage() {
           </span>
         </div>
 
-        <div style={{ position: 'relative', maxWidth: 800 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', maxWidth: 800 }}>
           <p
             style={{
               fontSize: 18,
