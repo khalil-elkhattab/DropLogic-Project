@@ -11,12 +11,12 @@ import MetricTooltip from '@/components/results/MetricTooltip';
 import type { AnalysisPayload, RawAsset } from '@/lib/analysis-types';
 import type { ActiveCompetitor } from '@/components/results/ActiveCompetitorsTable';
 
-const BACKEND_API_BASE = 'https://www.droplogicai.com';
-const RUN_ANALYSIS_API_URL = `${BACKEND_API_BASE}/api/run-analysis`;
+// Same-origin paths — proxied to FastAPI via next.config.ts rewrites (no mixed content)
+const RUN_ANALYSIS_API_URL = '/api/run-analysis';
 
 function proxyVideoUrl(originalUrl: string): string {
   if (!originalUrl) return '';
-  return `${BACKEND_API_BASE}/api/proxy-video?url=${encodeURIComponent(originalUrl)}`;
+  return `/api/proxy-video?url=${encodeURIComponent(originalUrl)}`;
 }
 
 function mapAsset(asset: RawAsset, index: number) {
