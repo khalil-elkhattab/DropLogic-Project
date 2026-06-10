@@ -8,15 +8,15 @@ import NetProfitCard from '@/components/results/NetProfitCard';
 import SalesTrendChart from '@/components/results/SalesTrendChart';
 import ActiveCompetitorsTable from '@/components/results/ActiveCompetitorsTable';
 import MetricTooltip from '@/components/results/MetricTooltip';
-import { getBackendUrl } from '@/lib/backend';
 import type { AnalysisPayload, RawAsset } from '@/lib/analysis-types';
 import type { ActiveCompetitor } from '@/components/results/ActiveCompetitorsTable';
 
-const RUN_ANALYSIS_API_URL = 'http://164.90.235.14:8000/api/run-analysis';
+const BACKEND_API_BASE = 'http://164.90.235.14:8000';
+const RUN_ANALYSIS_API_URL = `${BACKEND_API_BASE}/api/run-analysis`;
 
 function proxyVideoUrl(originalUrl: string): string {
   if (!originalUrl) return '';
-  return `${getBackendUrl()}/api/proxy-video?url=${encodeURIComponent(originalUrl)}`;
+  return `${BACKEND_API_BASE}/api/proxy-video?url=${encodeURIComponent(originalUrl)}`;
 }
 
 function mapAsset(asset: RawAsset, index: number) {
