@@ -35,6 +35,8 @@ from usage_quota import QuotaExceededError, enforce_bake_quota, record_successfu
 from cleanup_assets import cleanup_bake_temp_assets
 from ad_history import fetch_generated_ads, save_generated_ad
 from product_insights import build_active_competitors, build_financials, build_sales_trend
+from url_utils import sanitize_download_url
+from urllib.parse import quote
 
 app = FastAPI(
     title="DropLogic Neural Content Pipeline (Local Server Edition)",
@@ -74,8 +76,11 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 COMPUTED_CACHE = {}
 RENDER_JOBS = {}  
 
-# Server deployment target public URL mapping
-SERVER_PUBLIC_URL = os.getenv("SERVER_PUBLIC_URL", "http://164.90.235.14:8000").rstrip('/')
+# Server deployment target public URL mapping (strip mistaken /api suffix)
+SERVER_PUBLIC_URL = (os.getenv("SERVER_PUBLIC_URL", "http://164.90.235.14:8000") or "").rstrip("/")
+if SERVER_PUBLIC_URL.endswith("/api"):
+    SERVER_PUBLIC_URL = SERVER_PUBLIC_URL[:-4]
+LOCAL_API_ORIGIN = os.getenv("LOCAL_API_ORIGIN", "http://127.0.0.1:8000").rstrip("/")
 
 # Securely initialize the Groq client instance
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
@@ -519,22 +524,33 @@ async def start_video_baking_pipeline(
         local_temp_video_path = os.path.join(OUTPUTS_DIR, temp_video_filename)
         temp_cleanup_paths.append(local_temp_video_path)
         
-        print(f"[📥 DOWNLOADER] Pre-downloading full source TikTok asset locally...")
+        try:
+            download_url = sanitize_download_url(
+                request.video_url,
+                backend_public_url=SERVER_PUBLIC_URL,
+            )
+        except ValueError as url_err:
+            raise HTTPException(status_code=400, detail=str(url_err)) from url_err
+
+        print(f"[📥 DOWNLOADER] Pre-downloading source asset: {download_url[:160]}...")
         
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "*/*"
+            "Accept": "*/*",
+            "Referer": "https://www.tiktok.com/",
         }
         
         async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.get(request.video_url, headers=headers, timeout=40.0)
+            response = await client.get(download_url, headers=headers, timeout=40.0)
             if response.status_code == 200:
                 with open(local_temp_video_path, "wb") as f:
                     f.write(response.content)
                 print(f"[🟢 DOWNLOAD SUCCESS] Source video securely stored at: {local_temp_video_path}")
             else:
                 print(f"[⚠️ PROXY FALLBACK] Direct download code {response.status_code}. Attempting Proxy...")
-                proxy_fallback_url = f"http://127.0.0.1:8000/api/proxy-video?url={httpx.URLEncodedString(request.video_url)}"
+                proxy_fallback_url = (
+                    f"{LOCAL_API_ORIGIN}/api/proxy-video?url={quote(download_url, safe='')}"
+                )
                 response_alt = await client.get(proxy_fallback_url, timeout=40.0)
                 if response_alt.status_code == 200:
                     with open(local_temp_video_path, "wb") as f:
