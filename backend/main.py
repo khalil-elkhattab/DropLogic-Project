@@ -42,13 +42,38 @@ app = FastAPI(
     version="4.2.0"
 )
 
-# CORS middleware adjustments to bypass browser restrictions
+
+def _resolve_cors_origins() -> tuple[list[str], bool]:
+    """
+    Browsers reject allow_origins=['*'] combined with allow_credentials=True.
+    Set CORS_ALLOW_ORIGINS=* in .env for fully open access (credentials disabled),
+    or a comma-separated allowlist for production + local dev.
+    """
+    raw = (os.getenv("CORS_ALLOW_ORIGINS") or "").strip()
+    if raw == "*":
+        return ["*"], False
+
+    if raw:
+        origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+        return origins, True
+
+    return [
+        "https://www.droplogicai.com",
+        "https://droplogicai.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ], True
+
+
+_cors_origins, _cors_allow_credentials = _resolve_cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # 🛠️ تحديد المسارات المطلقة لضمان ثبات الملفات على سيرفرات Linux
