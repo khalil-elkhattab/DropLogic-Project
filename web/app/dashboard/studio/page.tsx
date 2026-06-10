@@ -9,7 +9,7 @@ import ScriptEditor, {
   type AdScript,
 } from '@/components/studio/ScriptEditor';
 import QuotaPaywall from '@/components/studio/QuotaPaywall';
-import { getBackendUrl, resolveBakedVideoUrl } from '@/lib/backend';
+import { getApiUrl, resolveBakedVideoUrl } from '@/lib/backend';
 import {
   FREE_TIER_PAYWALL_MESSAGE,
   isFreeTierLimitReached,
@@ -182,7 +182,7 @@ function AIStudioContent() {
 
     try {
       // 3. إرسال الطلب الفعلي المليء بالتعديلات الحية إلى الباكيند لطبخ الصوت والميكس
-      const response = await fetch(`${getBackendUrl()}/api/video-studio/bake`, {
+      const response = await fetch(getApiUrl('/api/video-studio/bake'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

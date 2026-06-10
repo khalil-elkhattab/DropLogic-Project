@@ -8,7 +8,7 @@ import { UserButton } from "@clerk/clerk-react";
 
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import TikTokPreviewOverlay from '@/components/publish/TikTokPreviewOverlay';
-import { getBackendUrl, resolveBakedVideoUrl } from '@/lib/backend';
+import { buildBackendAssetUrl, getApiUrl, resolveBakedVideoUrl } from '@/lib/backend';
 
 
 
@@ -64,8 +64,6 @@ function SuccessPublishContent() {
 
 
 
-      const backendUrl = getBackendUrl();
-
       let resolved = "";
 
 
@@ -76,11 +74,7 @@ function SuccessPublishContent() {
 
         if (rawVideoUrl) {
 
-          resolved = rawVideoUrl.startsWith('http')
-
-            ? rawVideoUrl
-
-            : `${backendUrl}${rawVideoUrl.startsWith('/') ? '' : '/'}${rawVideoUrl}`;
+          resolved = buildBackendAssetUrl(rawVideoUrl);
 
         }
 
@@ -96,7 +90,7 @@ function SuccessPublishContent() {
 
           const statusRes = await fetch(
 
-            `${backendUrl}/api/video-studio/render-status/${encodeURIComponent(renderId)}`,
+            getApiUrl(`/api/video-studio/render-status/${encodeURIComponent(renderId)}`),
 
           );
 
@@ -120,7 +114,7 @@ function SuccessPublishContent() {
 
         if (!resolved) {
 
-          const assetsRes = await fetch(`${backendUrl}/api/video-studio/published-assets`);
+          const assetsRes = await fetch(getApiUrl('/api/video-studio/published-assets'));
 
           if (assetsRes.ok) {
 
