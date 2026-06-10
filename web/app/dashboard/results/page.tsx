@@ -11,7 +11,7 @@ import MetricTooltip from '@/components/results/MetricTooltip';
 import type { AnalysisPayload, RawAsset } from '@/lib/analysis-types';
 import type { ActiveCompetitor } from '@/components/results/ActiveCompetitorsTable';
 
-const BACKEND_API_BASE = 'http://164.90.235.14:8000';
+const BACKEND_API_BASE = 'https://www.droplogicai.com';
 const RUN_ANALYSIS_API_URL = `${BACKEND_API_BASE}/api/run-analysis`;
 
 function proxyVideoUrl(originalUrl: string): string {
