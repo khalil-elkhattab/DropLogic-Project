@@ -12,6 +12,8 @@ import { getBackendUrl } from '@/lib/backend';
 import type { AnalysisPayload, RawAsset } from '@/lib/analysis-types';
 import type { ActiveCompetitor } from '@/components/results/ActiveCompetitorsTable';
 
+const RUN_ANALYSIS_API_URL = 'http://164.90.235.14:8000/api/run-analysis';
+
 function proxyVideoUrl(originalUrl: string): string {
   if (!originalUrl) return '';
   return `${getBackendUrl()}/api/proxy-video?url=${encodeURIComponent(originalUrl)}`;
@@ -46,7 +48,7 @@ function DashboardContent() {
     if (!keywordToSearch) return;
     setLoading(true);
     try {
-      const response = await fetch(`${getBackendUrl()}/api/run-analysis`, {
+      const response = await fetch(RUN_ANALYSIS_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keyword: keywordToSearch }),
