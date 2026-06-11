@@ -10,6 +10,7 @@ import ActiveCompetitorsTable from '@/components/results/ActiveCompetitorsTable'
 import MetricTooltip from '@/components/results/MetricTooltip';
 import type { AnalysisPayload, RawAsset } from '@/lib/analysis-types';
 import type { ActiveCompetitor } from '@/components/results/ActiveCompetitorsTable';
+import { resolveBakeVideoUrl, toProxyPreviewUrl } from '@/lib/video-url';
 
 // Same-origin paths — proxied to FastAPI via next.config.ts rewrites (no mixed content)
 const RUN_ANALYSIS_API_URL = '/api/run-analysis';
@@ -49,22 +50,21 @@ async function pollAnalysisUntilComplete(taskId: string): Promise<AnalysisPayloa
   throw new Error('Analysis timed out while waiting for background job to finish.');
 }
 
-function proxyVideoUrl(originalUrl: string): string {
-  if (!originalUrl) return '';
-  return `/api/proxy-video?url=${encodeURIComponent(originalUrl)}`;
-}
-
 function mapAsset(asset: RawAsset, index: number) {
   const originalUrl =
     asset.video_url || asset.videoUrl || asset.play || asset.wmplay || '';
+  const sourceVideoUrl = resolveBakeVideoUrl(originalUrl);
   return {
     id: asset.id || `DL-ASSET-${index}`,
     title: asset.title || asset.desc || `Raw Asset # ${index + 1}`,
     duration: asset.duration || '0:15',
-    video_url: proxyVideoUrl(originalUrl),
+    source_video_url: sourceVideoUrl,
+    video_url: sourceVideoUrl ? toProxyPreviewUrl(sourceVideoUrl) : '',
     platform: asset.platform || 'TikTok',
   };
 }
+
+type MappedAsset = ReturnType<typeof mapAsset>;
 
 function DashboardContent() {
   const [activeTab, setActiveTab] = useState('intelligence');
@@ -73,7 +73,7 @@ function DashboardContent() {
 
   const [loading, setLoading] = useState(false);
   const [analysisData, setAnalysisData] = useState<AnalysisPayload | null>(null);
-  const [selectedVideo, setSelectedVideo] = useState<ReturnType<typeof mapAsset> | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<MappedAsset | null>(null);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('query') || 'neck massager');
 
   const currentProductName = analysisData?.product_name || searchQuery;
@@ -133,17 +133,37 @@ function DashboardContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, triggerLiveAnalysis]);
 
-  const handleLaunchStudio = () => {
-    if (selectedVideo?.video_url) {
-      const studioParams = new URLSearchParams({
-        videoUrl: selectedVideo.video_url,
-        title: selectedVideo.title || currentProductName,
-        platform: selectedVideo.platform || 'TikTok',
-      });
-      router.push(`/dashboard/studio?${studioParams.toString()}`);
-    } else {
-      router.push(`/dashboard/studio?title=${encodeURIComponent(currentProductName)}`);
+  useEffect(() => {
+    const assets = analysisData?.raw_assets || analysisData?.assets || [];
+    if (!assets.length) return;
+    const mapped = assets.map(mapAsset);
+    const firstValid = mapped.find((asset) => asset.source_video_url);
+    if (firstValid && (!selectedVideo || selectedVideo.id === 'DL-EMPTY')) {
+      setSelectedVideo(firstValid);
     }
+  }, [analysisData, selectedVideo]);
+
+  const handleLaunchStudio = () => {
+    const sourceUrl = selectedVideo?.source_video_url || resolveBakeVideoUrl(selectedVideo?.video_url);
+    if (!sourceUrl) {
+      window.alert('Select a video asset with a valid TikTok source URL before launching Studio.');
+      return;
+    }
+
+    const studioParams = new URLSearchParams({
+      sourceUrl,
+      title: selectedVideo?.title || currentProductName,
+      platform: selectedVideo?.platform || 'TikTok',
+    });
+
+    if (analysisData?.analysis_id) {
+      studioParams.set('analysisId', analysisData.analysis_id);
+    }
+    if (selectedVideo?.id) {
+      studioParams.set('assetId', selectedVideo.id);
+    }
+
+    router.push(`/dashboard/studio?${studioParams.toString()}`);
   };
 
   const handleInspectStore = (url: string) => {
@@ -240,6 +260,15 @@ function DashboardContent() {
           </div>
         </div>
         <div className="flex items-center gap-6">
+          {selectedVideo?.source_video_url && (
+            <button
+              type="button"
+              onClick={handleLaunchStudio}
+              className="hidden md:inline-flex h-9 items-center bg-emerald-600 text-white px-5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-emerald-500 transition-all active:scale-[0.97]"
+            >
+              Launch Studio →
+            </button>
+          )}
           <div className="hidden sm:flex gap-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest border-r border-white/10 pr-6">
             <div>
               Market: <span className="text-white">{analysisData?.market || 'US'}</span>
@@ -432,7 +461,7 @@ function DashboardContent() {
                     .filter((v) => v.id !== 'DL-EMPTY')
                     .map((video) => {
                       const isSelected = selectedVideo?.id === video.id;
-                      const hasValidVideo = Boolean(video.video_url);
+                      const hasValidVideo = Boolean(video.source_video_url);
                       return (
                         <button
                           key={video.id}
@@ -495,7 +524,7 @@ function DashboardContent() {
                   <button
                     type="button"
                     onClick={handleLaunchStudio}
-                    disabled={!selectedVideo || selectedVideo.id === 'DL-EMPTY'}
+                    disabled={!selectedVideo?.source_video_url}
                     className="w-full sm:w-auto h-12 bg-emerald-600 text-white px-8 rounded-xl font-black text-xs uppercase tracking-[0.2em] hover:bg-emerald-500 transition-all active:scale-[0.98] disabled:opacity-40 shadow-[0_0_30px_-10px_rgba(52,211,153,0.9)]"
                   >
                     Launch Studio ({selectedVideo?.platform || 'Select Asset'}) →

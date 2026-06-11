@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -9,6 +9,7 @@ import { UserButton } from "@clerk/clerk-react";
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import TikTokPreviewOverlay from '@/components/publish/TikTokPreviewOverlay';
 import { buildBackendAssetUrl, getApiUrl, resolveBakedVideoUrl } from '@/lib/backend';
+import { downloadVideoFile } from '@/lib/download';
 
 
 
@@ -39,6 +40,7 @@ function SuccessPublishContent() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [showTikTokOverlay, setShowTikTokOverlay] = useState(false);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+  const autoDownloadTriggered = useRef(false);
 
 
 
@@ -47,6 +49,8 @@ function SuccessPublishContent() {
   const renderId = searchParams.get('renderId') || "";
 
   const incomingCaption = searchParams.get('caption') || "This viral Amazon gadget completely transformed my room! 🤫✨";
+
+  const autoDownload = searchParams.get('autoDownload') === '1';
 
 
 
@@ -219,58 +223,25 @@ function SuccessPublishContent() {
 
 
   const handleDownload = async () => {
-
     if (!sourceVideoUrl) return;
 
-
-
     setIsDownloading(true);
-
     try {
-
-      const filename = `droplogic-ad-${Date.now()}.mp4`;
-
-      const downloadUrl = `/api/download?url=${encodeURIComponent(sourceVideoUrl)}&filename=${encodeURIComponent(filename)}`;
-
-
-
-      const response = await fetch(downloadUrl);
-
-      if (!response.ok) throw new Error('Download failed');
-
-
-
-      const blob = await response.blob();
-
-      const objectUrl = URL.createObjectURL(blob);
-
-      const anchor = document.createElement('a');
-
-      anchor.href = objectUrl;
-
-      anchor.download = filename;
-
-      document.body.appendChild(anchor);
-
-      anchor.click();
-
-      anchor.remove();
-
-      URL.revokeObjectURL(objectUrl);
-
+      await downloadVideoFile(sourceVideoUrl);
     } catch (err) {
-
       console.error('Download error:', err);
-
       setLoadError('Download failed. Please try again.');
-
     } finally {
-
       setIsDownloading(false);
-
     }
-
   };
+
+  useEffect(() => {
+    if (!autoDownload || !sourceVideoUrl || isLoading || autoDownloadTriggered.current) return;
+    autoDownloadTriggered.current = true;
+    void handleDownload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoDownload, sourceVideoUrl, isLoading]);
 
 
 

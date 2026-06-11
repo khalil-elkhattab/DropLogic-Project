@@ -42,7 +42,7 @@ from usage_quota import QuotaExceededError, enforce_bake_quota, record_successfu
 from cleanup_assets import cleanup_bake_temp_assets
 from ad_history import fetch_generated_ads, save_generated_ad
 from product_insights import build_active_competitors, build_financials, build_sales_trend
-from media_downloader import coerce_media_url, probe_media_url, sanitize_asset_record
+from media_downloader import coerce_media_url, probe_media_url, resolve_bake_video_url, sanitize_asset_record
 from url_utils import sanitize_download_url
 from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
 
@@ -110,9 +110,17 @@ ANALYSIS_JOBS: dict[str, AnalysisJob] = {}
 KEYWORD_ACTIVE_TASK: dict[str, str] = {}
 
 # Server deployment target public URL mapping (strip mistaken /api suffix)
-SERVER_PUBLIC_URL = (os.getenv("SERVER_PUBLIC_URL", "http://164.90.235.14:8000") or "").rstrip("/")
+SERVER_PUBLIC_URL = (os.getenv("SERVER_PUBLIC_URL", "http://164.90.235.14:8000") or "").strip().rstrip("/")
 if SERVER_PUBLIC_URL.endswith("/api"):
     SERVER_PUBLIC_URL = SERVER_PUBLIC_URL[:-4]
+
+
+def public_server_origin() -> str:
+    """Absolute http(s) origin for publicly reachable static assets (audio for cloud render)."""
+    origin = (SERVER_PUBLIC_URL or "http://164.90.235.14:8000").strip().rstrip("/")
+    if not re.match(r"^https?://", origin, re.IGNORECASE):
+        origin = f"http://{origin.lstrip('/')}"
+    return origin
 # Securely initialize the Groq client instance
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
@@ -636,8 +644,12 @@ async def start_video_baking_pipeline(
     request: VideoBakeRequest,
     background_tasks: BackgroundTasks,
 ):
-    if not request.video_url:
-        raise HTTPException(status_code=400, detail="Target raw video source URL cannot be empty.")
+    raw_video_input = (request.video_url or "").strip()
+    if not raw_video_input or raw_video_input.lower() in {"null", "undefined", "none"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Target raw video source URL cannot be empty. Select a TikTok asset in Results and launch Studio again.",
+        )
 
     try:
         quota_status = await enforce_bake_quota(request.clerk_user_id, request.email)
@@ -666,19 +678,22 @@ async def start_video_baking_pipeline(
         unique_id = os.urandom(4).hex()
         print(f"\n[🚀 CLOUD BAKE START] Initializing Json2Video / Renderform pipeline for: {request.product_name}")
 
-        source_video_url = coerce_media_url(
-            request.video_url,
-            backend_public_url=SERVER_PUBLIC_URL,
+        source_video_url = resolve_bake_video_url(
+            raw_video_input,
+            backend_public_url=public_server_origin(),
         )
         if not source_video_url:
             raise HTTPException(
                 status_code=400,
-                detail="Source video URL is invalid, blocked, or missing a protocol (https:// required).",
+                detail=(
+                    "Source video URL is invalid, blocked, or missing https://. "
+                    f"Received: {raw_video_input[:120]!r}"
+                ),
             )
 
         probed_url = await probe_media_url(
             source_video_url,
-            backend_public_url=SERVER_PUBLIC_URL,
+            backend_public_url=public_server_origin(),
         )
         if probed_url:
             source_video_url = probed_url
@@ -718,7 +733,7 @@ async def start_video_baking_pipeline(
 
         final_audio_path = os.path.join(OUTPUTS_DIR, f"mix_{unique_id}.wav")
         temp_cleanup_paths.append(final_audio_path)
-        public_audio_url = f"{SERVER_PUBLIC_URL}/static/outputs/mix_{unique_id}.wav"
+        public_audio_url = f"{public_server_origin()}/static/outputs/mix_{unique_id}.wav"
 
         output_video_filename = f"final_video_{unique_id}.mp4"
         output_video_path = os.path.join(OUTPUTS_DIR, output_video_filename)
@@ -740,7 +755,7 @@ async def start_video_baking_pipeline(
         await download_rendered_video(cloud_job.final_video_url, output_video_path)
 
         RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path, "provider": cloud_job.provider}
-        final_video_url = f"{SERVER_PUBLIC_URL}/static/outputs/{output_video_filename}"
+        final_video_url = f"{public_server_origin()}/static/outputs/{output_video_filename}"
 
         if request.clerk_user_id:
             await record_successful_bake(

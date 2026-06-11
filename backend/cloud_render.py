@@ -76,8 +76,11 @@ def _reject_shotstack_artifacts(url: str, response_text: str = "") -> None:
 
 
 def _safe_urls(video_url: str, audio_url: str) -> tuple[str, str]:
-    safe_video = normalize_media_url(video_url)
-    safe_audio = normalize_media_url(audio_url)
+    try:
+        safe_video = normalize_media_url((video_url or "").strip())
+        safe_audio = normalize_media_url((audio_url or "").strip())
+    except ValueError as exc:
+        raise CloudRenderError(f"Invalid render URL: {exc}") from exc
     _reject_shotstack_artifacts(safe_video)
     _reject_shotstack_artifacts(safe_audio)
     return safe_video, safe_audio

@@ -10,6 +10,8 @@ import ScriptEditor, {
 } from '@/components/studio/ScriptEditor';
 import QuotaPaywall from '@/components/studio/QuotaPaywall';
 import { getApiUrl, resolveBakedVideoUrl } from '@/lib/backend';
+import { downloadVideoFile } from '@/lib/download';
+import { resolveBakeVideoUrl, resolvePreviewVideoUrl } from '@/lib/video-url';
 import {
   FREE_TIER_PAYWALL_MESSAGE,
   isFreeTierLimitReached,
@@ -47,13 +49,23 @@ function AIStudioContent() {
   const [videoQuota, setVideoQuota] = useState<VideoQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(true);
   
-  // استقبال رابط الفيديو الممرر ديناميكياً من خيار المستخدم في صفحة النتائج
-  const incomingVideoUrl = searchParams.get('videoUrl') || "https://www.w3schools.com/html/mov_bbb.mp4";
-  const incomingTitle = searchParams.get('title') || "Trending Product";
+  const incomingTitle = searchParams.get('title') || searchParams.get('product') || 'Trending Product';
+  const incomingAnalysisId = searchParams.get('analysisId') || '';
+  const incomingAssetId = searchParams.get('assetId') || 'DL-ASSET-01';
 
-  // --- ميزة كرت التيك توك المختار المستخرج ديناميكياً من نظام التصفية والبحث الجديد لخدمة الدروب شيبينغ ---
-  const [selectedCardId, setSelectedCardId] = useState('DL-ASSET-01');
-  const [currentVideoUrl, setCurrentVideoUrl] = useState(incomingVideoUrl);
+  const initialBakeUrl = resolveBakeVideoUrl(
+    searchParams.get('sourceUrl'),
+    searchParams.get('videoUrl'),
+  );
+  const initialPreviewUrl =
+    resolvePreviewVideoUrl(searchParams.get('videoUrl'), initialBakeUrl) ||
+    (initialBakeUrl ? resolvePreviewVideoUrl(initialBakeUrl) : '');
+
+  const [selectedCardId, setSelectedCardId] = useState(incomingAssetId);
+  const [bakeVideoUrl, setBakeVideoUrl] = useState(initialBakeUrl);
+  const [currentVideoUrl, setCurrentVideoUrl] = useState(
+    initialPreviewUrl || 'https://www.w3schools.com/html/mov_bbb.mp4',
+  );
 
   // حالات التحكم في هندسة الاستوديو
   const [aspectRatio, setAspectRatio] = useState('reels'); // 'reels' (9:16) | 'desktop' (16:9) | 'square' (1:1)
@@ -95,9 +107,30 @@ function AIStudioContent() {
     }
   }, [isLoaded, loadVideoQuota]);
 
+  useEffect(() => {
+    const source = resolveBakeVideoUrl(
+      searchParams.get('sourceUrl'),
+      searchParams.get('videoUrl'),
+    );
+    const preview =
+      resolvePreviewVideoUrl(searchParams.get('videoUrl'), source) ||
+      (source ? resolvePreviewVideoUrl(source) : '');
+
+    if (source) setBakeVideoUrl(source);
+    if (preview) setCurrentVideoUrl(preview);
+
+    const assetId = searchParams.get('assetId');
+    if (assetId) setSelectedCardId(assetId);
+  }, [searchParams]);
+
   const freeLimitReached = isFreeTierLimitReached(videoQuota);
   const generateDisabled =
-    isRendering || isGeneratingScript || quotaLoading || freeLimitReached || !user?.id;
+    isRendering ||
+    isGeneratingScript ||
+    quotaLoading ||
+    freeLimitReached ||
+    !user?.id ||
+    !resolveBakeVideoUrl(bakeVideoUrl, searchParams.get('sourceUrl'));
 
   // دالة جلب النص الذكي المخصص عبر خادم FastAPI الموحد والمباشر
   const fetchAiScriptAngle = async (angleKey: string) => {
@@ -114,7 +147,7 @@ function AIStudioContent() {
         body: JSON.stringify({
           product_name: incomingTitle,
           angle: backendAngleName,
-          video_url: currentVideoUrl,
+          video_url: bakeVideoUrl || currentVideoUrl,
         }),
       });
 
@@ -163,6 +196,14 @@ function AIStudioContent() {
 
   // 🔥 دالة الـ Bake الاحترافية المعدلة لربط وإرسال وتمرير البيانات الحية لصفحة التنزيل بأمان
   const handleStartRender = async () => {
+    const sourceForBake = resolveBakeVideoUrl(bakeVideoUrl, searchParams.get('sourceUrl'));
+    if (!sourceForBake) {
+      window.alert(
+        'No valid TikTok source URL found. Go back to Results, select a video asset, and click Launch Studio.',
+      );
+      return;
+    }
+
     setIsRendering(true);
     setProgress(0);
 
@@ -187,7 +228,7 @@ function AIStudioContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product_name: incomingTitle,
-          video_url: currentVideoUrl,
+          video_url: sourceForBake,
           final_hook: getActiveHook(adScript),
           final_body: adScript.body,
           final_cta: adScript.cta,
@@ -207,31 +248,39 @@ function AIStudioContent() {
         throw new Error(FREE_TIER_PAYWALL_MESSAGE);
       }
 
-      if (!response.ok) throw new Error("Baking pipeline failed on server side.");
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(errText || `Baking pipeline failed (${response.status})`);
+      }
 
       const result = await response.json();
       
       clearInterval(progressInterval);
       setProgress(100);
 
-      // 4. تمرير روابط الفيديو والصوت النهائي ومستندات التسويق لصفحة الـ download (publish) بذكاء وبدون خطأ الـ undefined
       if (result && result.success) {
         await loadVideoQuota();
-        const renderId = result.render_id || "";
+        const renderId = result.render_id || '';
         const videoUrl =
           result.final_video_url ||
-          (renderId ? resolveBakedVideoUrl(renderId) : "");
-        const marketingCaption = result.marketing_assets?.video_caption || "Amazing Product! ✨";
+          (renderId ? resolveBakedVideoUrl(renderId) : '');
+        const marketingCaption = result.marketing_assets?.video_caption || 'Amazing Product! ✨';
 
-        setTimeout(() => {
-          setIsRendering(false);
-          const params = new URLSearchParams({
-            videoUrl,
-            caption: marketingCaption,
-          });
-          if (renderId) params.set('renderId', renderId);
-          router.push(`/dashboard/publish?${params.toString()}`);
-        }, 500);
+        try {
+          await downloadVideoFile(videoUrl);
+        } catch (downloadErr) {
+          console.warn('Auto-download will retry on publish page:', downloadErr);
+        }
+
+        setIsRendering(false);
+        const params = new URLSearchParams({
+          videoUrl,
+          caption: marketingCaption,
+          autoDownload: '1',
+        });
+        if (renderId) params.set('renderId', renderId);
+        if (incomingAnalysisId) params.set('analysisId', incomingAnalysisId);
+        router.push(`/dashboard/publish?${params.toString()}`);
       }
     } catch (error) {
       console.error("[-] Error during video baking pipeline:", error);
@@ -353,7 +402,8 @@ function AIStudioContent() {
               Engaging narrative structures generated for your selected product asset. Preview and edit your text layers here before baking.
             </p>
             <div className="text-[9px] font-mono text-gray-400 bg-gray-100 rounded px-2 py-1 mt-2 border border-black/[0.03]">
-              SYST: Active script binding for {incomingTitle}...
+              SYST: {incomingAnalysisId ? `Analysis ${incomingAnalysisId}` : 'Studio'} · Asset {selectedCardId}
+              {bakeVideoUrl ? ' · Source locked' : ' · ⚠ No source URL'}
             </div>
           </div>
 

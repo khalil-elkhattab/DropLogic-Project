@@ -32,13 +32,25 @@ def is_blocked_media_host(url: str) -> bool:
     return any(fragment in lowered for fragment in BLOCKED_MEDIA_HOST_FRAGMENTS)
 
 
+def resolve_bake_video_url(raw_url: str, *, backend_public_url: str) -> str | None:
+    """
+    Best-effort resolver for bake requests: unwraps proxy paths, fixes //cdn URLs,
+    returns None instead of raising.
+    """
+    if raw_url is None:
+        return None
+    return coerce_media_url(str(raw_url).strip(), backend_public_url=backend_public_url)
+
+
 def coerce_media_url(raw_url: str, *, backend_public_url: str) -> str | None:
     """
     Normalize any scraped/proxied URL to https/http.
     Returns None instead of raising when invalid or blocked (e.g. legacy Shotstack).
     """
-    if not raw_url or not str(raw_url).strip():
+    text = str(raw_url or "").strip()
+    if not text or text.lower() in {"null", "undefined", "none"}:
         return None
+    raw_url = text
 
     if is_blocked_media_host(str(raw_url)):
         logger.warning("Blocked legacy Shotstack URL (skipped): %r", raw_url)
