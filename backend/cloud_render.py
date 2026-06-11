@@ -6,10 +6,14 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
+import logging
+
 import httpx
 import requests
 
-from url_utils import normalize_media_url
+logger = logging.getLogger("droplogic.cloud_render")
+
+from url_utils import BLOCKED_HOST_FRAGMENTS, normalize_media_url
 
 ProviderName = Literal["json2video", "renderform"]
 
@@ -60,8 +64,42 @@ def _parse_combined_id(combined_id: str) -> tuple[ProviderName, str]:
     raise CloudRenderError(f"Unrecognized cloud render id: {combined_id}")
 
 
+def _reject_shotstack_artifacts(url: str, response_text: str = "") -> None:
+    combined = f"{url}\n{response_text}".lower()
+    if "shotstack" in combined:
+        raise CloudRenderError(
+            "Shotstack is disabled on this deployment. Use Json2Video or Renderform only."
+        )
+    for fragment in BLOCKED_HOST_FRAGMENTS:
+        if fragment in combined:
+            raise CloudRenderError(f"Blocked legacy media host ({fragment})")
+
+
 def _safe_urls(video_url: str, audio_url: str) -> tuple[str, str]:
-    return normalize_media_url(video_url), normalize_media_url(audio_url)
+    safe_video = normalize_media_url(video_url)
+    safe_audio = normalize_media_url(audio_url)
+    _reject_shotstack_artifacts(safe_video)
+    _reject_shotstack_artifacts(safe_audio)
+    return safe_video, safe_audio
+
+
+def _is_provider_exhausted(status_code: int, response_text: str) -> bool:
+    """Detect quota/forbidden responses (incl. legacy Shotstack 0-credits errors)."""
+    text = (response_text or "").lower()
+    if status_code in (401, 402, 403):
+        return True
+    return any(
+        token in text
+        for token in (
+            "forbidden",
+            "0 credits",
+            "no credits",
+            "quota",
+            "exceeded",
+            "shotstack",
+            "insufficient",
+        )
+    )
 
 
 def submit_json2video(
@@ -97,7 +135,12 @@ def submit_json2video(
     }
 
     response = requests.post(JSON2VIDEO_MOVIES_URL, json=payload, headers=headers, timeout=30)
+    _reject_shotstack_artifacts(JSON2VIDEO_MOVIES_URL, response.text)
     if response.status_code not in (200, 201):
+        if _is_provider_exhausted(response.status_code, response.text):
+            raise CloudRenderError(
+                f"Json2Video unavailable ({response.status_code}): {response.text[:200]}"
+            )
         raise CloudRenderError(
             f"Json2Video submit failed ({response.status_code}): {response.text[:300]}"
         )
@@ -137,7 +180,12 @@ def submit_renderform(
     }
 
     response = requests.post(RENDERFORM_RENDER_URL, json=payload, headers=headers, timeout=30)
+    _reject_shotstack_artifacts(RENDERFORM_RENDER_URL, response.text)
     if response.status_code not in (200, 201):
+        if _is_provider_exhausted(response.status_code, response.text):
+            raise CloudRenderError(
+                f"Renderform unavailable ({response.status_code}): {response.text[:200]}"
+            )
         raise CloudRenderError(
             f"Renderform submit failed ({response.status_code}): {response.text[:300]}"
         )
@@ -160,10 +208,12 @@ def poll_json2video(project_id: str) -> CloudRenderJob:
         timeout=30,
     )
     if response.status_code != 200:
+        _reject_shotstack_artifacts(JSON2VIDEO_MOVIES_URL, response.text)
         raise CloudRenderError(
             f"Json2Video status failed ({response.status_code}): {response.text[:300]}"
         )
 
+    _reject_shotstack_artifacts(JSON2VIDEO_MOVIES_URL, response.text)
     movie = response.json().get("movie") or {}
     status = str(movie.get("status", "running")).lower()
     combined = _combined_id("json2video", project_id)
@@ -190,10 +240,12 @@ def poll_renderform(request_id: str) -> CloudRenderJob:
         timeout=30,
     )
     if response.status_code != 200:
+        _reject_shotstack_artifacts(RENDERFORM_STATUS_URL, response.text)
         raise CloudRenderError(
             f"Renderform status failed ({response.status_code}): {response.text[:300]}"
         )
 
+    _reject_shotstack_artifacts(RENDERFORM_STATUS_URL, response.text)
     data = response.json()
     status = str(data.get("status", "processing")).lower()
     combined = _combined_id("renderform", request_id)
@@ -259,8 +311,15 @@ def submit_with_failover(
                 duration=duration,
             )
             return provider, render_id
+        except CloudRenderError as exc:
+            err_text = str(exc).lower()
+            if "shotstack" in err_text:
+                logger.warning("[%s] Skipping legacy Shotstack artifact: %s", provider, exc)
+            else:
+                logger.warning("[%s] Submit failed: %s", provider, exc)
+            errors.append(f"{provider}: {exc}")
         except Exception as exc:
-            print(f"[⚠️ {provider}] Submit failed: {exc}")
+            logger.warning("[%s] Submit failed: %s", provider, exc)
             errors.append(f"{provider}: {exc}")
 
     raise CloudRenderError("All cloud providers failed to accept render. " + " | ".join(errors))
@@ -279,8 +338,10 @@ def render_with_failover(
     """
     tried: set[ProviderName] = set()
     last_error: Exception | None = None
+    attempts = 0
 
-    while len(tried) < 2:
+    while len(tried) < 2 and attempts < 2:
+        attempts += 1
         preferred = None
         if tried:
             preferred = "renderform" if "json2video" in tried else "json2video"
@@ -296,12 +357,22 @@ def render_with_failover(
             tried.add(provider)
             job = wait_for_render(provider, render_id)
             return job
+        except CloudRenderError as exc:
+            last_error = exc
+            if "shotstack" in str(exc).lower():
+                logger.warning("[FAILOVER] Ignoring legacy Shotstack error: %s", exc)
+            else:
+                logger.warning("[FAILOVER] %s", exc)
+            if not tried:
+                tried.update({"json2video", "renderform"})
         except Exception as exc:
             last_error = exc
-            print(f"[🔄 FAILOVER] {exc}")
-            if len(tried) >= 2:
-                break
-            print("[🔄 FAILOVER] Switching to alternate cloud render provider...")
+            logger.warning("[FAILOVER] %s", exc)
+            if not tried:
+                tried.update({"json2video", "renderform"})
+
+        if len(tried) < 2:
+            logger.info("[FAILOVER] Switching to alternate cloud render provider...")
 
     raise CloudRenderError(
         f"Cloud render failed on all providers. Last error: {last_error}"
@@ -321,11 +392,15 @@ def fetch_cloud_render_status(combined_id: str) -> dict[str, Any]:
 
 async def download_rendered_video(remote_url: str, output_path: str) -> None:
     safe_url = normalize_media_url(remote_url)
-    async with httpx.AsyncClient(follow_redirects=True, timeout=120.0) as client:
-        response = await client.get(safe_url)
-        if response.status_code != 200:
-            raise CloudRenderError(
-                f"Failed to download rendered video ({response.status_code})"
-            )
-        with open(output_path, "wb") as handle:
-            handle.write(response.content)
+    _reject_shotstack_artifacts(safe_url)
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=120.0) as client:
+            response = await client.get(safe_url)
+            if response.status_code != 200:
+                raise CloudRenderError(
+                    f"Failed to download rendered video ({response.status_code})"
+                )
+            with open(output_path, "wb") as handle:
+                handle.write(response.content)
+    except httpx.UnsupportedProtocol as exc:
+        raise CloudRenderError(f"Invalid rendered video URL protocol: {exc}") from exc

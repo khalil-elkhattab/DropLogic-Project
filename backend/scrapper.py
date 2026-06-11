@@ -4,9 +4,12 @@ import httpx
 import random
 from dotenv import load_dotenv
 
-from url_utils import normalize_media_url, sanitize_asset_video_url
+from media_downloader import coerce_media_url
+from url_utils import normalize_media_url
 
 logger = logging.getLogger("droplogic.scrapper")
+
+DEFAULT_BACKEND_PUBLIC = (os.getenv("SERVER_PUBLIC_URL") or "http://164.90.235.14:8000").rstrip("/")
 
 load_dotenv()
 
@@ -23,7 +26,8 @@ async def fetch_all_platforms_assets(keyword: str):
     accumulated_text = ""
 
     if not RAPIDAPI_KEY:
-        raise ValueError("CRITICAL ERROR: RAPIDAPI_KEY is missing from .env file.")
+        logger.error("RAPIDAPI_KEY is missing — returning empty asset list instead of crashing")
+        return [], f"Live dropshipping analysis ready for {clean_keyword}."
 
     # الهيدرز الرسمية المطابقة للوحة التحكم الخاصة بك في نوكيا هب
     headers = {
@@ -47,9 +51,12 @@ async def fetch_all_platforms_assets(keyword: str):
                 
                 for item in videos_list[:4]: # جلب 4 فيديوهات بدقة
                     raw_play = item.get("play") or item.get("wmplay") or ""
-                    video_url = sanitize_asset_video_url(raw_play)
+                    video_url = coerce_media_url(
+                        raw_play,
+                        backend_public_url=DEFAULT_BACKEND_PUBLIC,
+                    )
                     if not video_url:
-                        logger.warning("Skipping TikTok item with invalid play URL: %r", raw_play)
+                        logger.warning("Skipping TikTok item with invalid/blocked play URL: %r", raw_play)
                         continue
 
                     ad_text = item.get("title") or item.get("desc") or f"Winning Product | {keyword.title()}"

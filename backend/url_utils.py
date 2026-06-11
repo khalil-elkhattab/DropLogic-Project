@@ -5,12 +5,25 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qs, unquote, urlparse
 
+BLOCKED_HOST_FRAGMENTS = (
+    "shotstack.io",
+    "shotstack.com",
+    "api.shotstack",
+)
+
 
 def _backend_public_origin(public_url: str) -> str:
     origin = (public_url or "http://164.90.235.14:8000").strip().rstrip("/")
     if origin.endswith("/api"):
         origin = origin[:-4]
     return origin
+
+
+def _reject_blocked_hosts(url: str) -> None:
+    lowered = url.lower()
+    for fragment in BLOCKED_HOST_FRAGMENTS:
+        if fragment in lowered:
+            raise ValueError(f"Legacy Shotstack URLs are disabled: {url}")
 
 
 def normalize_media_url(raw_url: str) -> str:
@@ -33,6 +46,7 @@ def normalize_media_url(raw_url: str) -> str:
     if not re.match(r"^https?://", url, re.IGNORECASE):
         url = f"https://{url.lstrip('/')}"
 
+    _reject_blocked_hosts(url)
     return url
 
 
@@ -59,9 +73,11 @@ def sanitize_download_url(raw_url: str, *, backend_public_url: str) -> str:
     return url
 
 
-def sanitize_asset_video_url(raw_url: str) -> str | None:
+def sanitize_asset_video_url(raw_url: str, *, backend_public_url: str = "") -> str | None:
     """Best-effort normalization for scraped assets; returns None if invalid."""
     try:
+        if backend_public_url:
+            return sanitize_download_url(raw_url, backend_public_url=backend_public_url)
         return normalize_media_url(raw_url)
     except ValueError:
         return None
