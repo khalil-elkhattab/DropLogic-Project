@@ -1,7 +1,10 @@
+import logging
 import os
 import httpx
 import random
 from dotenv import load_dotenv
+
+logger = logging.getLogger("droplogic.scrapper")
 
 load_dotenv()
 
@@ -84,7 +87,7 @@ async def fetch_all_platforms_assets(keyword: str):
                             }
                         })
         except Exception as e:
-            print(f"[⚠️ TIKWM Data Fetch Error]: {e}")
+            logger.warning("TIKWM data fetch failed for keyword=%r: %s", clean_keyword, e, exc_info=True)
 
     if len(final_assets) == 0:
         accumulated_text = f"Live dropshipping analysis ready for {keyword}."

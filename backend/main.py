@@ -1,10 +1,12 @@
 import os
 import random
 import json
-import httpx  
+import httpx
 import re
 import asyncio
 import time
+import logging
+import traceback
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,6 +18,12 @@ from groq import Groq
 
 # 1. Load environment variables from .env file
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("droplogic")
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -151,11 +159,22 @@ def analyze_text_with_real_ai(live_scraped_text: str, keyword: str) -> dict:
 
 
 def clean_and_parse_json(raw_text: str) -> dict:
-    raw_text = raw_text.strip()
-    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    """Extract and parse JSON from LLM output; return {} instead of crashing."""
+    if not raw_text or not str(raw_text).strip():
+        logger.warning("AI returned empty content — using script fallbacks")
+        return {}
+
+    candidate = str(raw_text).strip()
+    match = re.search(r"\{.*\}", candidate, re.DOTALL)
     if match:
-        raw_text = match.group(0)
-    return json.loads(raw_text)
+        candidate = match.group(0)
+
+    try:
+        parsed = json.loads(candidate)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError as exc:
+        logger.warning("Failed to parse AI JSON output: %s | snippet=%r", exc, candidate[:200])
+        return {}
 
 
 def normalize_script_layers(script_layers: dict, product_name: str) -> dict:
@@ -306,7 +325,13 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
     if "problem" in clean_angle or "solve" in clean_angle:
         angle_prompt = f"{base_instructions}\nAngle: Problem-Solving.\nHooks should expose a painful problem then tease transformation.\nBody should explain the solution.\nCTA should drive immediate purchase."
     elif "viral" in clean_angle or "tiktok" in clean_angle:
-        angle_prompt = f"{base_instructions}\nAngle: TikTok Viral Style.\nHooks should feel organic, like "TikTok made me buy it" energy.\nBody should use social proof.\nCTA should create FOMO."
+        angle_prompt = (
+            f"{base_instructions}\n"
+            "Angle: TikTok Viral Style.\n"
+            'Hooks should feel organic, like "TikTok made me buy it" energy.\n'
+            "Body should use social proof.\n"
+            "CTA should create FOMO."
+        )
     elif "urgency" in clean_angle or "fomo" in clean_angle:
         angle_prompt = f"{base_instructions}\nAngle: Urgency / Price Drop.\nHooks should flash scarcity or warehouse clearing.\nBody should intensify the sale.\nCTA must include a deadline."
     elif "ugc" in clean_angle:
@@ -332,7 +357,8 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
                 script_layers,
             )
         except Exception as groq_err:
-            print(f"[⚠️ GROQ EXCEPTION] Error: {groq_err}. Trying OpenRouter Fallback...")
+            logger.warning("Groq script generation failed, trying OpenRouter: %s", groq_err)
+            logger.debug(traceback.format_exc())
 
     if OPENROUTER_API_KEY:
         try:
@@ -361,7 +387,8 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
                         script_layers,
                     )
         except Exception as or_err:
-            print(f"[-] OpenRouter Fallback Failed: {or_err}")
+            logger.warning("OpenRouter script generation failed, using defaults: %s", or_err)
+            logger.debug(traceback.format_exc())
 
     return build_script_engine_response(
         request.product_name,
