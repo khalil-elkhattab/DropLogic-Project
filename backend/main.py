@@ -4,7 +4,6 @@ import json
 import httpx  
 import re
 import asyncio
-import subprocess
 import time
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,17 +29,16 @@ except ImportError:
 
 # 🟢 STRICT AUDIO ENGINE IMPORT (No more hidden fallbacks / No more warnings)
 from audio_processor import generate_voice_over, mix_voice_and_background
-from caption_engine import generate_burned_captions
 from usage_quota import QuotaExceededError, enforce_bake_quota, record_successful_bake
 from cleanup_assets import cleanup_bake_temp_assets
 from ad_history import fetch_generated_ads, save_generated_ad
 from product_insights import build_active_competitors, build_financials, build_sales_trend
 from url_utils import sanitize_download_url
-from urllib.parse import quote
+from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
 
 app = FastAPI(
     title="DropLogic Neural Content Pipeline (Local Server Edition)",
-    description="Integrated backend engine executing internal FFmpeg video baking locally on DigitalOcean.",
+    description="Integrated backend engine executing cloud video baking via Json2Video and Renderform.",
     version="4.2.0"
 )
 
@@ -80,8 +78,6 @@ RENDER_JOBS = {}
 SERVER_PUBLIC_URL = (os.getenv("SERVER_PUBLIC_URL", "http://164.90.235.14:8000") or "").rstrip("/")
 if SERVER_PUBLIC_URL.endswith("/api"):
     SERVER_PUBLIC_URL = SERVER_PUBLIC_URL[:-4]
-LOCAL_API_ORIGIN = os.getenv("LOCAL_API_ORIGIN", "http://127.0.0.1:8000").rstrip("/")
-
 # Securely initialize the Groq client instance
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
@@ -376,92 +372,7 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
 
 
 # ----------------------------------------------------------------------
-# 🛠️ Asynchronous Local Processing Thread for FFmpeg Video Baking
-# ----------------------------------------------------------------------
-ANTI_BAN_VIDEO_FILTER = (
-    "hflip,setpts=1.03*PTS,eq=contrast=1.05:brightness=0.02:saturation=1.1"
-)
-ANTI_BAN_AUDIO_FILTER = "atempo=0.97"
-
-
-def _escape_subtitles_path(path: str) -> str:
-    normalized = os.path.abspath(path).replace('\\', '/')
-    return normalized.replace(':', r'\:')
-
-
-def _build_video_filter(anti_ban_filter: bool, subtitle_path: str | None) -> str | None:
-    filters: list[str] = []
-
-    if anti_ban_filter:
-        filters.append(ANTI_BAN_VIDEO_FILTER)
-
-    if subtitle_path and os.path.exists(subtitle_path):
-        filters.append(f"subtitles={_escape_subtitles_path(subtitle_path)}")
-
-    if not filters:
-        return None
-
-    return ','.join(filters)
-
-
-def run_local_ffmpeg_bake(
-    video_input_path: str,
-    audio_input_path: str,
-    output_video_path: str,
-    duration: int,
-    job_id: str,
-    anti_ban_filter: bool = False,
-    subtitle_path: str | None = None,
-):
-    try:
-        print(f"[🎬 FFmpeg PROCESS] Starting local render engine for job: {job_id}")
-        if anti_ban_filter:
-            print("[🛡️ ANTI-BAN] Applying hflip + micro-speed + color-grade uniquification filters")
-        if subtitle_path:
-            print(f"[💬 CAPTIONS] Burning TikTok-style captions from: {subtitle_path}")
-
-        command = [
-            'ffmpeg', '-y',
-            '-i', video_input_path,
-            '-i', audio_input_path,
-            '-map', '0:v',
-            '-map', '1:a',
-        ]
-
-        video_filter = _build_video_filter(anti_ban_filter, subtitle_path)
-        if video_filter:
-            command.extend(['-vf', video_filter])
-
-        if anti_ban_filter:
-            command.extend(['-af', ANTI_BAN_AUDIO_FILTER])
-
-        command.extend([
-            '-c:v', 'libx264',
-            '-profile:v', 'main',
-            '-level:v', '4.0',
-            '-c:a', 'aac',
-            '-shortest',
-            '-t', str(duration),
-            '-pix_fmt', 'yuv420p',
-            output_video_path,
-        ])
-        
-        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-        if process.returncode == 0:
-            print(f"[🟢 FFmpeg SUCCESS] Rendering finished perfectly for job: {job_id}")
-            RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path}
-        else:
-            print(f"[🔴 FFmpeg FAIL] FFmpeg non-zero output: {process.stderr}")
-            RENDER_JOBS[job_id] = {"status": "failed", "error": process.stderr}
-            
-    except Exception as ffmpeg_err:
-        print(f"[🚨 FFmpeg EXCEPTION] Critical error: {str(ffmpeg_err)}")
-        RENDER_JOBS[job_id] = {"status": "failed", "error": str(ffmpeg_err)}
-
-
-# ----------------------------------------------------------------------
-# 📌 Local Bake Engine (معدل بالتزامن الكامل لإجبار الفرونت إند على الانتظار)
+# 📌 Cloud Bake Engine (Json2Video primary, Renderform failover)
 # ----------------------------------------------------------------------
 @video_studio_router.get("/usage", summary="Return current video bake quota for a signed-in user")
 async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional[str] = Query(None)):
@@ -484,7 +395,7 @@ async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional
         raise HTTPException(status_code=500, detail=f"Unable to fetch usage quota: {exc}") from exc
 
 
-@video_studio_router.post("/bake", summary="Bake marketing assets internally using local server FFmpeg processing")
+@video_studio_router.post("/bake", summary="Bake marketing assets via Json2Video / Renderform cloud pipeline")
 async def start_video_baking_pipeline(
     request: VideoBakeRequest,
     background_tasks: BackgroundTasks,
@@ -517,105 +428,54 @@ async def start_video_baking_pipeline(
 
     try:
         unique_id = os.urandom(4).hex()
-        job_id = f"local_bake_{unique_id}"
-        print(f"\n[🚀 LOCAL BAKE START] Initializing rendering pipeline for: {request.product_name}")
+        print(f"\n[🚀 CLOUD BAKE START] Initializing Json2Video / Renderform pipeline for: {request.product_name}")
 
-        temp_video_filename = f"temp_download_{unique_id}.mp4"
-        local_temp_video_path = os.path.join(OUTPUTS_DIR, temp_video_filename)
-        temp_cleanup_paths.append(local_temp_video_path)
-        
         try:
-            download_url = sanitize_download_url(
+            source_video_url = sanitize_download_url(
                 request.video_url,
                 backend_public_url=SERVER_PUBLIC_URL,
             )
         except ValueError as url_err:
             raise HTTPException(status_code=400, detail=str(url_err)) from url_err
 
-        print(f"[📥 DOWNLOADER] Pre-downloading source asset: {download_url[:160]}...")
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "*/*",
-            "Referer": "https://www.tiktok.com/",
-        }
-        
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.get(download_url, headers=headers, timeout=40.0)
-            if response.status_code == 200:
-                with open(local_temp_video_path, "wb") as f:
-                    f.write(response.content)
-                print(f"[🟢 DOWNLOAD SUCCESS] Source video securely stored at: {local_temp_video_path}")
-            else:
-                print(f"[⚠️ PROXY FALLBACK] Direct download code {response.status_code}. Attempting Proxy...")
-                proxy_fallback_url = (
-                    f"{LOCAL_API_ORIGIN}/api/proxy-video?url={quote(download_url, safe='')}"
-                )
-                response_alt = await client.get(proxy_fallback_url, timeout=40.0)
-                if response_alt.status_code == 200:
-                    with open(local_temp_video_path, "wb") as f:
-                        f.write(response_alt.content)
-                else:
-                    raise HTTPException(status_code=400, detail="Unable to safely retrieve or cache the video from TikTok servers.")
+        print(f"[🔗 SOURCE VIDEO] {source_video_url[:160]}...")
 
         full_custom_script = f"{request.final_hook} {request.final_body} {request.final_cta}"
-        print(f"[🎙️ AI SYNTHESIS] Generating voice over via internal engine...")
+        print("[🎙️ AI SYNTHESIS] Generating voice over via internal engine...")
         temp_voice_file = generate_voice_over(full_custom_script, request.selected_voice)
         temp_cleanup_paths.append(temp_voice_file)
 
-        print(f"[🎵 AUDIO MIXER] Merging voice over with background music tracks...")
+        print("[🎵 AUDIO MIXER] Merging voice over with background music tracks...")
         mix_voice_and_background(
             voice_path=temp_voice_file,
             bg_music_type=request.selected_bg_music,
-            output_filename=f"mix_{unique_id}"
+            output_filename=f"mix_{unique_id}",
         )
-        
+
         final_audio_path = os.path.join(OUTPUTS_DIR, f"mix_{unique_id}.wav")
         temp_cleanup_paths.append(final_audio_path)
+        public_audio_url = f"{SERVER_PUBLIC_URL}/static/outputs/mix_{unique_id}.wav"
 
         output_video_filename = f"final_video_{unique_id}.mp4"
         output_video_path = os.path.join(OUTPUTS_DIR, output_video_filename)
-        caption_ass_path = os.path.join(OUTPUTS_DIR, f"captions_{unique_id}.ass")
-        temp_cleanup_paths.append(caption_ass_path)
+        target_duration = float(request.video_duration or 15.0)
 
-        subtitle_path = None
-
-        if request.burn_captions:
-            print("[💬 CAPTION ENGINE] Syncing hook/body/CTA to voiceover timeline...")
-            subtitle_path = generate_burned_captions(
-                hook=request.final_hook,
-                body=request.final_body,
-                cta=request.final_cta,
-                audio_path=final_audio_path,
-                output_path=caption_ass_path,
-                fallback_duration=float(request.video_duration or 15.0),
-            )
-            if subtitle_path:
-                print(f"[🟢 CAPTION ENGINE] ASS subtitle track ready: {subtitle_path}")
-            else:
-                print("[⚠️ CAPTION ENGINE] No caption cues generated — continuing without burned text")
-
-        RENDER_JOBS[job_id] = {"status": "rendering", "file_path": output_video_path}
-        target_duration = int(request.video_duration) if request.video_duration else 15
-        
-        # 🟢 تعديل الحماية الأكبر: نجعل الركيزة تنتظر انتهاء الـ FFmpeg بالكامل قبل إطلاق الاستجابة
-        print(f"[⏳ Synchronous Wait] Forcing pipeline to hold network thread until FFmpeg finishes perfectly...")
-        await asyncio.to_thread(
-            run_local_ffmpeg_bake,
-            local_temp_video_path,
-            final_audio_path,
-            output_video_path,
-            target_duration,
-            job_id,
-            request.anti_ban_filter,
-            subtitle_path,
+        print("[☁️ CLOUD RENDER] Submitting to Json2Video with Renderform failover...")
+        cloud_job = await asyncio.to_thread(
+            render_with_failover,
+            video_url=source_video_url,
+            audio_url=public_audio_url,
+            product_name=request.product_name,
+            duration=target_duration,
         )
 
-        # التحقق من أن عملية الرندرة نجحت بالفعل ولم تفشل داخلياً
-        job_result = RENDER_JOBS.get(job_id, {"status": "failed"})
-        if job_result["status"] == "failed":
-            raise HTTPException(status_code=500, detail=f"FFmpeg rendering failed: {job_result.get('error')}")
+        job_id = cloud_job.combined_id
+        RENDER_JOBS[job_id] = {"status": "rendering", "file_path": output_video_path, "provider": cloud_job.provider}
 
+        print(f"[📥 CLOUD DOWNLOAD] Persisting rendered asset from {cloud_job.provider}...")
+        await download_rendered_video(cloud_job.final_video_url, output_video_path)
+
+        RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path, "provider": cloud_job.provider}
         final_video_url = f"{SERVER_PUBLIC_URL}/static/outputs/{output_video_filename}"
 
         if request.clerk_user_id:
@@ -649,8 +509,9 @@ async def start_video_baking_pipeline(
 
         return {
             "success": True,
-            "message": "Render job successfully finished locally on your server. Zero third-party dependencies.",
+            "message": f"Cloud render completed via {cloud_job.provider} with automatic failover support.",
             "render_id": job_id,
+            "provider": cloud_job.provider,
             "final_video_url": final_video_url,
             "check_status_url": f"{SERVER_PUBLIC_URL}/api/video-studio/render-status/{job_id}",
             "marketing_assets": {
@@ -667,6 +528,14 @@ async def start_video_baking_pipeline(
             job_id if "job_id" in locals() else "",
         )
         raise
+    except CloudRenderError as cloud_err:
+        print(f"[🚨 CLOUD RENDER ERROR]: {cloud_err}")
+        background_tasks.add_task(
+            cleanup_bake_temp_assets,
+            temp_cleanup_paths,
+            job_id if "job_id" in locals() else "",
+        )
+        raise HTTPException(status_code=502, detail=str(cloud_err)) from cloud_err
     except Exception as e:
         print(f"[🚨 PIPELINE ERROR]: {str(e)}")
         background_tasks.add_task(
@@ -682,9 +551,20 @@ async def start_video_baking_pipeline(
 # ----------------------------------------------------------------------
 @video_studio_router.get("/render-status/{render_id}", summary="Fetch final cloud video asset link once processing finishes")
 async def get_render_status(render_id: str):
+    if render_id.startswith(("json2video_", "renderform_")):
+        try:
+            return await asyncio.to_thread(fetch_cloud_render_status, render_id)
+        except CloudRenderError as exc:
+            return {
+                "render_id": render_id,
+                "status": "failed",
+                "final_video_url": None,
+                "error": str(exc),
+            }
+
     if render_id not in RENDER_JOBS:
         return {"render_id": render_id, "status": "rendering", "final_video_url": None}
-    
+
     job_info = RENDER_JOBS[render_id]
     
     if job_info["status"] == "done":
@@ -702,7 +582,7 @@ async def get_render_status(render_id: str):
         return {
             "render_id": render_id,
             "status": "failed",
-            "error": job_info.get("error", "Unknown internal FFmpeg error")
+            "error": job_info.get("error", "Unknown cloud render error")
         }
     else:
         return {
