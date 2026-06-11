@@ -13,6 +13,38 @@ import type { ActiveCompetitor } from '@/components/results/ActiveCompetitorsTab
 
 // Same-origin paths — proxied to FastAPI via next.config.ts rewrites (no mixed content)
 const RUN_ANALYSIS_API_URL = '/api/run-analysis';
+const ANALYSIS_STATUS_API_URL = '/api/analysis-status';
+const ANALYSIS_POLL_INTERVAL_MS = 2500;
+const ANALYSIS_POLL_MAX_ATTEMPTS = 120; // ~5 minutes
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollAnalysisUntilComplete(taskId: string): Promise<AnalysisPayload | null> {
+  for (let attempt = 0; attempt < ANALYSIS_POLL_MAX_ATTEMPTS; attempt += 1) {
+    const statusRes = await fetch(`${ANALYSIS_STATUS_API_URL}/${encodeURIComponent(taskId)}`);
+    if (!statusRes.ok) {
+      throw new Error(`Analysis status check failed (${statusRes.status})`);
+    }
+
+    const statusJson = await statusRes.json();
+    if (statusJson.status === 'processing') {
+      await sleep(ANALYSIS_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (statusJson.status === 'completed' || statusJson.status === 'failed') {
+      const { task_id: _taskId, status: _status, keyword: _keyword, error: _error, ...payload } =
+        statusJson;
+      return payload as AnalysisPayload;
+    }
+
+    await sleep(ANALYSIS_POLL_INTERVAL_MS);
+  }
+
+  throw new Error('Analysis timed out while waiting for background job to finish.');
+}
 
 function proxyVideoUrl(originalUrl: string): string {
   if (!originalUrl) return '';
@@ -54,16 +86,30 @@ function DashboardContent() {
         body: JSON.stringify({ keyword: keywordToSearch }),
       });
 
-      if (response.ok) {
-        const jsonResult: AnalysisPayload = await response.json();
-        setAnalysisData(jsonResult);
+      if (!response.ok) {
+        throw new Error(`Analysis request failed (${response.status})`);
+      }
 
-        const assetsList = jsonResult.raw_assets || jsonResult.assets || [];
-        if (assetsList.length > 0) {
-          setSelectedVideo(mapAsset(assetsList[0], 0));
-        } else {
-          setSelectedVideo(null);
-        }
+      let jsonResult: AnalysisPayload;
+
+      if (response.status === 202) {
+        const accepted = await response.json();
+        const polled = await pollAnalysisUntilComplete(accepted.task_id);
+        if (!polled) return;
+        jsonResult = polled;
+      } else {
+        const body = await response.json();
+        const { status: _status, cached: _cached, task_id: _taskId, ...payload } = body;
+        jsonResult = payload as AnalysisPayload;
+      }
+
+      setAnalysisData(jsonResult);
+
+      const assetsList = jsonResult.raw_assets || jsonResult.assets || [];
+      if (assetsList.length > 0) {
+        setSelectedVideo(mapAsset(assetsList[0], 0));
+      } else {
+        setSelectedVideo(null);
       }
     } catch (error) {
       console.error('[-] Connection failed to FastAPI Backend:', error);

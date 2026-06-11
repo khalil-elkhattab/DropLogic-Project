@@ -11,9 +11,10 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from fastapi.responses import StreamingResponse, FileResponse
+from dataclasses import dataclass, field
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from typing import Optional
+from typing import Any, Literal, Optional
 from groq import Groq
 
 # 1. Load environment variables from .env file
@@ -86,8 +87,27 @@ os.makedirs(OUTPUTS_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Runtime storage for system caching and tracking local rendering jobs
-COMPUTED_CACHE = {}
-RENDER_JOBS = {}  
+COMPUTED_CACHE: dict[str, dict[str, Any]] = {}
+RENDER_JOBS: dict[str, dict[str, Any]] = {}
+
+AnalysisJobStatus = Literal["processing", "completed", "failed"]
+ANALYSIS_JOB_TTL_SEC = 3600
+ANALYSIS_JOB_MAX_COUNT = 200
+
+
+@dataclass
+class AnalysisJob:
+    task_id: str
+    keyword: str
+    status: AnalysisJobStatus
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
+ANALYSIS_JOBS: dict[str, AnalysisJob] = {}
+KEYWORD_ACTIVE_TASK: dict[str, str] = {}
 
 # Server deployment target public URL mapping (strip mistaken /api suffix)
 SERVER_PUBLIC_URL = (os.getenv("SERVER_PUBLIC_URL", "http://164.90.235.14:8000") or "").rstrip("/")
@@ -239,104 +259,250 @@ def build_script_engine_response(product_name: str, video_url: str, angle: str, 
 
 
 # ----------------------------------------------------------------------
-# 1. Product Mining Engine
+# 1. Product Mining Engine (async jobs — bypasses Vercel 60s proxy timeout)
 # ----------------------------------------------------------------------
-@app.post("/api/run-analysis", summary="Analyze product and extract live media assets")
-async def analyze_pipeline(request: ProductRequest):
+def _prune_analysis_jobs() -> None:
+    """Drop stale in-memory jobs so the worker does not grow without bound."""
+    now = time.time()
+    expired = [
+        task_id
+        for task_id, job in ANALYSIS_JOBS.items()
+        if now - job.updated_at > ANALYSIS_JOB_TTL_SEC
+    ]
+    for task_id in expired:
+        job = ANALYSIS_JOBS.pop(task_id, None)
+        if job and KEYWORD_ACTIVE_TASK.get(job.keyword) == task_id:
+            KEYWORD_ACTIVE_TASK.pop(job.keyword, None)
+
+    if len(ANALYSIS_JOBS) <= ANALYSIS_JOB_MAX_COUNT:
+        return
+
+    overflow = len(ANALYSIS_JOBS) - ANALYSIS_JOB_MAX_COUNT
+    oldest = sorted(ANALYSIS_JOBS.items(), key=lambda item: item[1].updated_at)
+    for task_id, job in oldest[:overflow]:
+        ANALYSIS_JOBS.pop(task_id, None)
+        if KEYWORD_ACTIVE_TASK.get(job.keyword) == task_id:
+            KEYWORD_ACTIVE_TASK.pop(job.keyword, None)
+
+
+def _sanitize_cached_payload(cached: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(cached)
+    cached_assets = []
+    for asset in payload.get("raw_assets") or []:
+        cleaned = sanitize_asset_record(asset, backend_public_url=SERVER_PUBLIC_URL)
+        if cleaned:
+            cached_assets.append(cleaned)
+    payload["raw_assets"] = cached_assets
+    return payload
+
+
+def _safe_analysis_fallback(keyword: str, *, error: str | None = None) -> dict[str, Any]:
+    return {
+        "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
+        "product_name": keyword,
+        "metrics": {
+            "logic_score": "8.5",
+            "sentiment": "78%",
+            "saturation": "Medium",
+            "net_margin": "35.0%",
+        },
+        "financials": build_financials(keyword),
+        "sales_trend": build_sales_trend(),
+        "active_competitors": build_active_competitors(keyword),
+        "intercepted_stores": [],
+        "audience_phrases": [
+            "Analysis completed with limited video assets — try another keyword."
+        ],
+        "raw_assets": [],
+        **({"error": error} if error else {}),
+    }
+
+
+async def _execute_analysis(clean_input: str) -> dict[str, Any]:
+    """Run scraping + AI enrichment and return the full analysis payload."""
+    print(f"\n[🚀 BACKGROUND JOB] Processing live cross-platform mining for: {clean_input}")
+
     try:
-        raw_input = request.keyword or request.target_input
-
-        if not raw_input:
-            raise HTTPException(status_code=400, detail="Input field ('keyword' or 'target_input') cannot be empty")
-
-        clean_input = raw_input.strip().lower()
-
-        if clean_input in COMPUTED_CACHE:
-            print(f"[⚡ GLOBAL CACHE HIT] Serving instant response payload for: {clean_input}")
-            cached = dict(COMPUTED_CACHE[clean_input])
-            cached_assets = []
-            for asset in cached.get("raw_assets") or []:
-                cleaned = sanitize_asset_record(
-                    asset,
-                    backend_public_url=SERVER_PUBLIC_URL,
-                )
-                if cleaned:
-                    cached_assets.append(cleaned)
-            cached["raw_assets"] = cached_assets
-            return cached
-
-        print(f"\n[🚀 ASYNC EXECUTION] Processing live cross-platform mining for: {clean_input}")
-
-        try:
-            video_assets, live_scraped_text = await fetch_all_platforms_assets(clean_input)
-        except Exception as e:
-            logger.warning("Platform asset fetch failed for %r: %s", clean_input, e, exc_info=True)
-            video_assets = []
-            live_scraped_text = ""
-
-        try:
-            real_ai_results = analyze_text_with_real_ai(live_scraped_text, clean_input)
-            if not isinstance(real_ai_results, dict):
-                raise ValueError("AI Engine did not return a valid dictionary structure")
-        except Exception as e:
-            logger.warning("AI Engine analytical error for %r: %s", clean_input, e)
-            real_ai_results = {
-                "logic_score": "8.5",
-                "sentiment": "78%",
-                "saturation": "Medium",
-                "net_margin": "35%",
-                "competitors": [{"domain": "globaltrendshop.com", "price": "$29.99", "spend": "Medium", "color": "text-amber-500", "story": "Active store tracking."}],
-                "phrases": ["Highly demanded item on global market feeds right now."],
-            }
-
-        financials = build_financials(clean_input)
-        sales_trend = build_sales_trend()
-        active_competitors = build_active_competitors(clean_input)
-
-        sanitized_assets = []
-        for asset in video_assets:
-            cleaned = sanitize_asset_record(asset, backend_public_url=SERVER_PUBLIC_URL)
-            if cleaned:
-                sanitized_assets.append(cleaned)
-            else:
-                logger.warning("Skipping analysis asset with invalid/blocked video_url: %r", asset)
-
-        response_payload = {
-            "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
-            "product_name": clean_input,
-            "metrics": {
-                "logic_score": real_ai_results.get("logic_score", "8.5"),
-                "sentiment": real_ai_results.get("sentiment", "78%"),
-                "saturation": real_ai_results.get("saturation", "Medium"),
-                "net_margin": f"{financials['net_profit_margin_pct']:.1f}%",
-            },
-            "financials": financials,
-            "sales_trend": sales_trend,
-            "active_competitors": active_competitors,
-            "intercepted_stores": active_competitors or real_ai_results.get("competitors", []),
-            "audience_phrases": real_ai_results.get("phrases", ["No trends returned from engine pipeline yet."]),
-            "raw_assets": sanitized_assets,
-        }
-
-        COMPUTED_CACHE[clean_input] = response_payload
-        return response_payload
-
-    except HTTPException:
-        raise
+        video_assets, live_scraped_text = await fetch_all_platforms_assets(clean_input)
     except Exception as exc:
-        logger.error("Analysis pipeline crashed — returning safe empty payload: %s", exc, exc_info=True)
-        keyword = (request.keyword or request.target_input or "product").strip().lower()
-        return {
-            "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
-            "product_name": keyword,
-            "metrics": {"logic_score": "8.5", "sentiment": "78%", "saturation": "Medium", "net_margin": "35.0%"},
-            "financials": build_financials(keyword),
-            "sales_trend": build_sales_trend(),
-            "active_competitors": build_active_competitors(keyword),
-            "intercepted_stores": [],
-            "audience_phrases": ["Analysis completed with limited video assets — try another keyword."],
-            "raw_assets": [],
+        logger.warning(
+            "Platform asset fetch failed for %r: %s", clean_input, exc, exc_info=True
+        )
+        video_assets = []
+        live_scraped_text = ""
+
+    try:
+        real_ai_results = analyze_text_with_real_ai(live_scraped_text, clean_input)
+        if not isinstance(real_ai_results, dict):
+            raise ValueError("AI Engine did not return a valid dictionary structure")
+    except Exception as exc:
+        logger.warning("AI Engine analytical error for %r: %s", clean_input, exc)
+        real_ai_results = {
+            "logic_score": "8.5",
+            "sentiment": "78%",
+            "saturation": "Medium",
+            "net_margin": "35%",
+            "competitors": [
+                {
+                    "domain": "globaltrendshop.com",
+                    "price": "$29.99",
+                    "spend": "Medium",
+                    "color": "text-amber-500",
+                    "story": "Active store tracking.",
+                }
+            ],
+            "phrases": ["Highly demanded item on global market feeds right now."],
         }
+
+    financials = build_financials(clean_input)
+    sales_trend = build_sales_trend()
+    active_competitors = build_active_competitors(clean_input)
+
+    sanitized_assets = []
+    for asset in video_assets:
+        cleaned = sanitize_asset_record(asset, backend_public_url=SERVER_PUBLIC_URL)
+        if cleaned:
+            sanitized_assets.append(cleaned)
+        else:
+            logger.warning("Skipping analysis asset with invalid/blocked video_url: %r", asset)
+
+    return {
+        "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
+        "product_name": clean_input,
+        "metrics": {
+            "logic_score": real_ai_results.get("logic_score", "8.5"),
+            "sentiment": real_ai_results.get("sentiment", "78%"),
+            "saturation": real_ai_results.get("saturation", "Medium"),
+            "net_margin": f"{financials['net_profit_margin_pct']:.1f}%",
+        },
+        "financials": financials,
+        "sales_trend": sales_trend,
+        "active_competitors": active_competitors,
+        "intercepted_stores": active_competitors or real_ai_results.get("competitors", []),
+        "audience_phrases": real_ai_results.get(
+            "phrases", ["No trends returned from engine pipeline yet."]
+        ),
+        "raw_assets": sanitized_assets,
+    }
+
+
+async def _run_analysis_background(task_id: str, clean_input: str) -> None:
+    job = ANALYSIS_JOBS.get(task_id)
+    if not job:
+        return
+
+    try:
+        result = await _execute_analysis(clean_input)
+        job.status = "completed"
+        job.result = result
+        job.error = None
+        COMPUTED_CACHE[clean_input] = result
+        logger.info("[✅ ANALYSIS JOB] task_id=%s keyword=%r completed", task_id, clean_input)
+    except Exception as exc:
+        logger.error(
+            "[❌ ANALYSIS JOB] task_id=%s keyword=%r failed: %s",
+            task_id,
+            clean_input,
+            exc,
+            exc_info=True,
+        )
+        fallback = _safe_analysis_fallback(clean_input, error=str(exc))
+        job.status = "failed"
+        job.result = fallback
+        job.error = str(exc)
+        COMPUTED_CACHE[clean_input] = fallback
+    finally:
+        job.updated_at = time.time()
+        if KEYWORD_ACTIVE_TASK.get(clean_input) == task_id:
+            KEYWORD_ACTIVE_TASK.pop(clean_input, None)
+
+
+def _analysis_status_response(job: AnalysisJob) -> dict[str, Any]:
+    if job.status == "processing":
+        return {
+            "task_id": job.task_id,
+            "status": "processing",
+            "keyword": job.keyword,
+        }
+
+    payload = dict(job.result or _safe_analysis_fallback(job.keyword))
+    response: dict[str, Any] = {
+        "task_id": job.task_id,
+        "status": job.status,
+        "keyword": job.keyword,
+        **payload,
+    }
+    if job.error:
+        response["error"] = job.error
+    return response
+
+
+@app.post(
+    "/api/run-analysis",
+    summary="Start async product analysis (returns 202 + task_id, or 200 on cache hit)",
+)
+async def analyze_pipeline(request: ProductRequest, background_tasks: BackgroundTasks):
+    raw_input = request.keyword or request.target_input
+    if not raw_input:
+        raise HTTPException(
+            status_code=400,
+            detail="Input field ('keyword' or 'target_input') cannot be empty",
+        )
+
+    clean_input = raw_input.strip().lower()
+    _prune_analysis_jobs()
+
+    if clean_input in COMPUTED_CACHE:
+        print(f"[⚡ GLOBAL CACHE HIT] Serving instant response payload for: {clean_input}")
+        cached = _sanitize_cached_payload(COMPUTED_CACHE[clean_input])
+        return {
+            "status": "completed",
+            "cached": True,
+            **cached,
+        }
+
+    existing_task_id = KEYWORD_ACTIVE_TASK.get(clean_input)
+    if existing_task_id:
+        existing_job = ANALYSIS_JOBS.get(existing_task_id)
+        if existing_job and existing_job.status == "processing":
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "task_id": existing_task_id,
+                    "status": "processing",
+                    "keyword": clean_input,
+                },
+            )
+
+    task_id = f"analysis_{os.urandom(8).hex()}"
+    ANALYSIS_JOBS[task_id] = AnalysisJob(
+        task_id=task_id,
+        keyword=clean_input,
+        status="processing",
+    )
+    KEYWORD_ACTIVE_TASK[clean_input] = task_id
+
+    background_tasks.add_task(_run_analysis_background, task_id, clean_input)
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "task_id": task_id,
+            "status": "processing",
+            "keyword": clean_input,
+        },
+    )
+
+
+@app.get(
+    "/api/analysis-status/{task_id}",
+    summary="Poll async analysis job status and retrieve the full payload when done",
+)
+async def get_analysis_status(task_id: str):
+    job = ANALYSIS_JOBS.get(task_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Unknown analysis task: {task_id}")
+    return _analysis_status_response(job)
 
 
 # ----------------------------------------------------------------------
