@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getBackendUrl } from '@/lib/backend';
+import { getBackendUrl, getBackendUrlSource } from '@/lib/backend';
 
 type ProxyOptions = {
   method?: string;
@@ -44,7 +44,14 @@ export async function proxyToBackend(
     const message =
       error instanceof Error ? error.message : 'Failed to reach analysis backend';
     return NextResponse.json(
-      { error: 'backend_unreachable', detail: message },
+      {
+        error: 'backend_unreachable',
+        detail: message,
+        backend_url: getBackendUrl(),
+        env_source: getBackendUrlSource(),
+        hint:
+          'Vercel cannot reach the droplet. Open port 8000 on UFW/DO firewall and ensure uvicorn binds 0.0.0.0:8000.',
+      },
       { status: 502 },
     );
   }

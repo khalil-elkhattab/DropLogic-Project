@@ -4,6 +4,7 @@ const isPublicRoute = createRouteMatcher([
   '/api/webhooks/lemonsqueezy',
   '/api/run-analysis',
   '/api/analysis-status(.*)',
+  '/api/backend-health',
 ]);
 
 export default clerkMiddleware(async (_auth, req) => {

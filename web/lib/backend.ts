@@ -18,11 +18,30 @@ export function normalizeBackendUrl(raw: string): string {
   return url;
 }
 
+/** Which env var supplied the backend origin (for diagnostics). */
+export function getBackendUrlSource():
+  | 'BACKEND_REWRITE_URL'
+  | 'NEXT_SERVER_FASTAPI_URL'
+  | 'NEXT_PUBLIC_BACKEND_URL'
+  | 'default' {
+  if (process.env.BACKEND_REWRITE_URL?.trim()) {
+    return 'BACKEND_REWRITE_URL';
+  }
+  if (process.env.NEXT_SERVER_FASTAPI_URL?.trim()) {
+    return 'NEXT_SERVER_FASTAPI_URL';
+  }
+  if (process.env.NEXT_PUBLIC_BACKEND_URL?.trim()) {
+    return 'NEXT_PUBLIC_BACKEND_URL';
+  }
+  return 'default';
+}
+
 /** Absolute FastAPI origin — for server-side proxy routes and asset URL building. */
 export function getBackendUrl(): string {
   const raw =
-    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    process.env.BACKEND_REWRITE_URL ||
     process.env.NEXT_SERVER_FASTAPI_URL ||
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
     DEFAULT_BACKEND_ORIGIN;
   return normalizeBackendUrl(raw);
 }
