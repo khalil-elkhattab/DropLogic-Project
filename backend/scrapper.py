@@ -4,6 +4,8 @@ import httpx
 import random
 from dotenv import load_dotenv
 
+from url_utils import normalize_media_url, sanitize_asset_video_url
+
 logger = logging.getLogger("droplogic.scrapper")
 
 load_dotenv()
@@ -44,48 +46,51 @@ async def fetch_all_platforms_assets(keyword: str):
                 videos_list = res_data.get("data", {}).get("videos", []) or res_data.get("data", [])
                 
                 for item in videos_list[:4]: # جلب 4 فيديوهات بدقة
-                    video_url = item.get("play") or item.get("wmplay") or ""
-                    
-                    if video_url:
-                        ad_text = item.get("title") or item.get("desc") or f"Winning Product | {keyword.title()}"
-                        accumulated_text += ad_text + " "
-                        
-                        # 📊 استخراج الـ Views والـ Likes الفجائية من الـ API
-                        stats = item.get("statistics", {})
-                        views_count = stats.get("play_count") or random.randint(15000, 450000)
-                        likes_count = stats.get("digg_count") or random.randint(1000, 35000)
-                        
-                        # 🏪 استخراج بيانات من يبيعه أو يعلن عنه (المتجر / اسم الحساب)
-                        author = item.get("author", {})
-                        merchant_username = author.get("unique_id") or author.get("nickname") or "Ecom_Store"
-                        merchant_avatar = author.get("avatar") or "https://via.placeholder.com/150"
-                        
-                        # 💰 معادلة ذكية لحساب الأرباح التقديرية (Estimated Earnings) للـ SaaS الخاص بك
-                        estimated_conversion_rate = 0.005 
-                        average_product_margin = 20
-                        calculated_earnings = int(views_count * estimated_conversion_rate * average_product_margin)
-                        
-                        # إذا كان الرقم ضخماً جداً، نضع له سقفاً منطقياً ليعطي انطباعاً احترافياً للمستخدم
-                        if calculated_earnings == 0:
-                            calculated_earnings = random.randint(1200, 8500)
+                    raw_play = item.get("play") or item.get("wmplay") or ""
+                    video_url = sanitize_asset_video_url(raw_play)
+                    if not video_url:
+                        logger.warning("Skipping TikTok item with invalid play URL: %r", raw_play)
+                        continue
 
-                        final_assets.append({
-                            "id": f"DL-TIK-{random.randint(100,999)}",
-                            "title": ad_text[:50] + "...",
-                            "video_url": video_url, 
-                            "platform": "TikTok",
-                            "is_muted": True, # تزويد حقل توجيهي إضافي للفرونت إند لإجبار مشغلات الفيديو على الصمت
-                            "metrics": {
-                                "views": views_count,
-                                "likes": likes_count,
-                                "estimated_earnings": f"${calculated_earnings:,}" # يخرج بصيغة $5,400
-                            },
-                            "merchant": {
-                                "store_name": f"{merchant_username} Shop",
-                                "tiktok_profile": f"https://www.tiktok.com/@{merchant_username}",
-                                "avatar": merchant_avatar
-                            }
-                        })
+                    ad_text = item.get("title") or item.get("desc") or f"Winning Product | {keyword.title()}"
+                    accumulated_text += ad_text + " "
+
+                    stats = item.get("statistics", {})
+                    views_count = stats.get("play_count") or random.randint(15000, 450000)
+                    likes_count = stats.get("digg_count") or random.randint(1000, 35000)
+
+                    author = item.get("author", {})
+                    merchant_username = author.get("unique_id") or author.get("nickname") or "Ecom_Store"
+                    raw_avatar = author.get("avatar") or "https://via.placeholder.com/150"
+                    try:
+                        merchant_avatar = normalize_media_url(raw_avatar)
+                    except ValueError:
+                        merchant_avatar = "https://via.placeholder.com/150"
+
+                    estimated_conversion_rate = 0.005
+                    average_product_margin = 20
+                    calculated_earnings = int(views_count * estimated_conversion_rate * average_product_margin)
+
+                    if calculated_earnings == 0:
+                        calculated_earnings = random.randint(1200, 8500)
+
+                    final_assets.append({
+                        "id": f"DL-TIK-{random.randint(100, 999)}",
+                        "title": ad_text[:50] + "...",
+                        "video_url": video_url,
+                        "platform": "TikTok",
+                        "is_muted": True,
+                        "metrics": {
+                            "views": views_count,
+                            "likes": likes_count,
+                            "estimated_earnings": f"${calculated_earnings:,}",
+                        },
+                        "merchant": {
+                            "store_name": f"{merchant_username} Shop",
+                            "tiktok_profile": f"https://www.tiktok.com/@{merchant_username}",
+                            "avatar": merchant_avatar,
+                        },
+                    })
         except Exception as e:
             logger.warning("TIKWM data fetch failed for keyword=%r: %s", clean_keyword, e, exc_info=True)
 

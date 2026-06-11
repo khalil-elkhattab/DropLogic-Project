@@ -41,7 +41,7 @@ from usage_quota import QuotaExceededError, enforce_bake_quota, record_successfu
 from cleanup_assets import cleanup_bake_temp_assets
 from ad_history import fetch_generated_ads, save_generated_ad
 from product_insights import build_active_competitors, build_financials, build_sales_trend
-from url_utils import sanitize_download_url
+from url_utils import sanitize_asset_video_url, sanitize_download_url
 from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
 
 app = FastAPI(
@@ -245,7 +245,18 @@ async def analyze_pipeline(request: ProductRequest):
     
     if clean_input in COMPUTED_CACHE:
         print(f"[⚡ GLOBAL CACHE HIT] Serving instant response payload for: {clean_input}")
-        return COMPUTED_CACHE[clean_input]
+        cached = dict(COMPUTED_CACHE[clean_input])
+        cached_assets = []
+        for asset in cached.get("raw_assets") or []:
+            if not isinstance(asset, dict):
+                continue
+            cleaned = dict(asset)
+            safe_video = sanitize_asset_video_url(str(cleaned.get("video_url") or ""))
+            if safe_video:
+                cleaned["video_url"] = safe_video
+                cached_assets.append(cleaned)
+        cached["raw_assets"] = cached_assets
+        return cached
         
     print(f"\n[🚀 ASYNC EXECUTION] Processing live cross-platform mining for: {clean_input}")
     
@@ -275,6 +286,19 @@ async def analyze_pipeline(request: ProductRequest):
     sales_trend = build_sales_trend()
     active_competitors = build_active_competitors(clean_input)
 
+    sanitized_assets = []
+    for asset in video_assets:
+        if not isinstance(asset, dict):
+            continue
+        cleaned = dict(asset)
+        raw_video = cleaned.get("video_url") or cleaned.get("videoUrl") or ""
+        safe_video = sanitize_asset_video_url(str(raw_video))
+        if not safe_video:
+            logger.warning("Dropping analysis asset with invalid video_url: %r", raw_video)
+            continue
+        cleaned["video_url"] = safe_video
+        sanitized_assets.append(cleaned)
+
     response_payload = {
         "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
         "product_name": clean_input,
@@ -289,7 +313,7 @@ async def analyze_pipeline(request: ProductRequest):
         "active_competitors": active_competitors,
         "intercepted_stores": active_competitors or real_ai_results.get("competitors", []),
         "audience_phrases": real_ai_results.get("phrases", ["No trends returned from engine pipeline yet."]),
-        "raw_assets": video_assets,
+        "raw_assets": sanitized_assets,
     }
     
     COMPUTED_CACHE[clean_input] = response_payload
@@ -663,6 +687,12 @@ app.include_router(ads_router)
 # ----------------------------------------------------------------------
 @app.get("/api/proxy-video", summary="Stream external videos safely via Backend to bypass CORS / Hotlinking restrictions")
 async def proxy_video(url: str = Query(..., description="The raw external video source URL")):
+    try:
+        safe_url = sanitize_download_url(url, backend_public_url=SERVER_PUBLIC_URL)
+    except ValueError as url_err:
+        logger.warning("Proxy rejected invalid URL %r: %s", url, url_err)
+        raise HTTPException(status_code=400, detail=str(url_err)) from url_err
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "*/*",
@@ -674,7 +704,7 @@ async def proxy_video(url: str = Query(..., description="The raw external video 
     async def video_chunk_generator():
         async with httpx.AsyncClient(follow_redirects=True) as client:
             try:
-                async with client.stream("GET", url, headers=headers, timeout=25.0) as response:
+                async with client.stream("GET", safe_url, headers=headers, timeout=25.0) as response:
                     if response.status_code in [200, 206]:
                         async for chunk in response.aiter_bytes(chunk_size=1024 * 64):
                             yield chunk

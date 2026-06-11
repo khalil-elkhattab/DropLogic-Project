@@ -1,4 +1,4 @@
-"""Normalize asset URLs before httpx download requests."""
+"""Normalize media URLs before httpx download / cloud render requests."""
 
 from __future__ import annotations
 
@@ -13,14 +13,13 @@ def _backend_public_origin(public_url: str) -> str:
     return origin
 
 
-def sanitize_download_url(raw_url: str, *, backend_public_url: str) -> str:
+def normalize_media_url(raw_url: str) -> str:
     """
-    Ensure a fully qualified http(s) URL for httpx.
+    Ensure an absolute http(s) URL suitable for httpx and cloud render APIs.
 
-    - ``//cdn.example.com/...`` → ``https://cdn.example.com/...``
+    - ``//cdn.tiktok.com/...`` → ``https://cdn.tiktok.com/...``
     - ``http:/host/...`` → ``http://host/...``
-    - ``/api/proxy-video?url=...`` → resolved against backend public origin, then unwrapped
-    - Proxy URLs with embedded ``url`` query → inner TikTok/CDN source URL
+    - ``v16-webapp.tiktok.com/...`` → ``https://v16-webapp.tiktok.com/...``
     """
     url = (raw_url or "").strip()
     if not url:
@@ -31,11 +30,25 @@ def sanitize_download_url(raw_url: str, *, backend_public_url: str) -> str:
 
     url = re.sub(r"^(https?):/([^/])", r"\1://\2", url, count=1)
 
-    if url.startswith("/"):
-        url = f"{_backend_public_origin(backend_public_url)}{url}"
-
     if not re.match(r"^https?://", url, re.IGNORECASE):
         url = f"https://{url.lstrip('/')}"
+
+    return url
+
+
+def sanitize_download_url(raw_url: str, *, backend_public_url: str) -> str:
+    """
+    Full bake/analysis sanitizer: resolves proxy paths, unwraps nested ``url`` params,
+    then normalizes to a protocol-safe absolute URL.
+    """
+    url = (raw_url or "").strip()
+    if not url:
+        raise ValueError("Video URL is empty")
+
+    if url.startswith("/") and not url.startswith("//"):
+        url = f"{_backend_public_origin(backend_public_url)}{url}"
+
+    url = normalize_media_url(url)
 
     parsed = urlparse(url)
     if "proxy-video" in parsed.path:
@@ -44,3 +57,11 @@ def sanitize_download_url(raw_url: str, *, backend_public_url: str) -> str:
             return sanitize_download_url(unquote(nested), backend_public_url=backend_public_url)
 
     return url
+
+
+def sanitize_asset_video_url(raw_url: str) -> str | None:
+    """Best-effort normalization for scraped assets; returns None if invalid."""
+    try:
+        return normalize_media_url(raw_url)
+    except ValueError:
+        return None

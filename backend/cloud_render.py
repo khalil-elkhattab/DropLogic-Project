@@ -9,6 +9,8 @@ from typing import Any, Callable, Literal
 import httpx
 import requests
 
+from url_utils import normalize_media_url
+
 ProviderName = Literal["json2video", "renderform"]
 
 JSON2VIDEO_MOVIES_URL = "https://api.json2video.com/v2/movies"
@@ -58,6 +60,10 @@ def _parse_combined_id(combined_id: str) -> tuple[ProviderName, str]:
     raise CloudRenderError(f"Unrecognized cloud render id: {combined_id}")
 
 
+def _safe_urls(video_url: str, audio_url: str) -> tuple[str, str]:
+    return normalize_media_url(video_url), normalize_media_url(audio_url)
+
+
 def submit_json2video(
     *,
     video_url: str,
@@ -65,6 +71,7 @@ def submit_json2video(
     product_name: str,
     duration: float,
 ) -> str:
+    video_url, audio_url = _safe_urls(video_url, audio_url)
     payload = {
         "comment": f"DropLogic Ad — {product_name}",
         "width": 1080,
@@ -111,6 +118,7 @@ def submit_renderform(
     product_name: str,
     duration: float,
 ) -> str:
+    video_url, audio_url = _safe_urls(video_url, audio_url)
     template_id = (os.getenv("RENDERFORM_TEMPLATE_ID") or "").strip()
     payload: dict[str, Any] = {
         "canvas": {"width": 1080, "height": 1920},
@@ -312,8 +320,9 @@ def fetch_cloud_render_status(combined_id: str) -> dict[str, Any]:
 
 
 async def download_rendered_video(remote_url: str, output_path: str) -> None:
+    safe_url = normalize_media_url(remote_url)
     async with httpx.AsyncClient(follow_redirects=True, timeout=120.0) as client:
-        response = await client.get(remote_url)
+        response = await client.get(safe_url)
         if response.status_code != 200:
             raise CloudRenderError(
                 f"Failed to download rendered video ({response.status_code})"
