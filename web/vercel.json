@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "app/api/run-analysis/route.ts": {
+      "maxDuration": 15
+    },
+    "app/api/analysis-status/[taskId]/route.ts": {
+      "maxDuration": 15
+    }
+  }
+}

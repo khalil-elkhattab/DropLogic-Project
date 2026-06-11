@@ -23,7 +23,10 @@ function sleep(ms: number) {
 
 async function pollAnalysisUntilComplete(taskId: string): Promise<AnalysisPayload | null> {
   for (let attempt = 0; attempt < ANALYSIS_POLL_MAX_ATTEMPTS; attempt += 1) {
-    const statusRes = await fetch(`${ANALYSIS_STATUS_API_URL}/${encodeURIComponent(taskId)}`);
+    const statusRes = await fetch(
+      `${ANALYSIS_STATUS_API_URL}/${encodeURIComponent(taskId)}`,
+      { cache: 'no-store' },
+    );
     if (!statusRes.ok) {
       throw new Error(`Analysis status check failed (${statusRes.status})`);
     }
@@ -84,23 +87,29 @@ function DashboardContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keyword: keywordToSearch }),
+        cache: 'no-store',
       });
-
-      if (!response.ok) {
-        throw new Error(`Analysis request failed (${response.status})`);
-      }
 
       let jsonResult: AnalysisPayload;
 
+      // 202 Accepted = job enqueued; poll until completed (each poll is a short GET).
       if (response.status === 202) {
         const accepted = await response.json();
+        if (!accepted?.task_id) {
+          throw new Error('Analysis accepted but no task_id returned from backend');
+        }
         const polled = await pollAnalysisUntilComplete(accepted.task_id);
         if (!polled) return;
         jsonResult = polled;
-      } else {
+      } else if (response.ok) {
         const body = await response.json();
         const { status: _status, cached: _cached, task_id: _taskId, ...payload } = body;
         jsonResult = payload as AnalysisPayload;
+      } else {
+        const errBody = await response.text().catch(() => '');
+        throw new Error(
+          `Analysis request failed (${response.status})${errBody ? `: ${errBody.slice(0, 200)}` : ''}`,
+        );
       }
 
       setAnalysisData(jsonResult);
