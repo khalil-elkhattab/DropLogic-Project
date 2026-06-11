@@ -45,6 +45,7 @@ from product_insights import build_active_competitors, build_financials, build_s
 from media_downloader import coerce_media_url, probe_media_url, resolve_bake_video_url, sanitize_asset_record
 from url_utils import sanitize_download_url
 from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
+from public_urls import api_public_url, backend_public_origin, static_asset_url
 
 if os.getenv("SHOTSTACK_KEY") or os.getenv("SHOTSTACK_API_KEY"):
     logger.warning(
@@ -109,18 +110,8 @@ class AnalysisJob:
 ANALYSIS_JOBS: dict[str, AnalysisJob] = {}
 KEYWORD_ACTIVE_TASK: dict[str, str] = {}
 
-# Server deployment target public URL mapping (strip mistaken /api suffix)
-SERVER_PUBLIC_URL = (os.getenv("SERVER_PUBLIC_URL", "http://164.90.235.14:8000") or "").strip().rstrip("/")
-if SERVER_PUBLIC_URL.endswith("/api"):
-    SERVER_PUBLIC_URL = SERVER_PUBLIC_URL[:-4]
-
-
-def public_server_origin() -> str:
-    """Absolute http(s) origin for publicly reachable static assets (audio for cloud render)."""
-    origin = (SERVER_PUBLIC_URL or "http://164.90.235.14:8000").strip().rstrip("/")
-    if not re.match(r"^https?://", origin, re.IGNORECASE):
-        origin = f"http://{origin.lstrip('/')}"
-    return origin
+# Legacy alias — prefer backend_public_origin() for static assets / cloud render URLs.
+SERVER_PUBLIC_URL = backend_public_origin()
 # Securely initialize the Groq client instance
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
@@ -680,7 +671,7 @@ async def start_video_baking_pipeline(
 
         source_video_url = resolve_bake_video_url(
             raw_video_input,
-            backend_public_url=public_server_origin(),
+            backend_public_url=backend_public_origin(),
         )
         if not source_video_url:
             raise HTTPException(
@@ -693,7 +684,7 @@ async def start_video_baking_pipeline(
 
         probed_url = await probe_media_url(
             source_video_url,
-            backend_public_url=public_server_origin(),
+            backend_public_url=backend_public_origin(),
         )
         if probed_url:
             source_video_url = probed_url
@@ -733,7 +724,8 @@ async def start_video_baking_pipeline(
 
         final_audio_path = os.path.join(OUTPUTS_DIR, f"mix_{unique_id}.wav")
         temp_cleanup_paths.append(final_audio_path)
-        public_audio_url = f"{public_server_origin()}/static/outputs/mix_{unique_id}.wav"
+        public_audio_url = static_asset_url(f"outputs/mix_{unique_id}.wav")
+        print(f"[🔗 PUBLIC AUDIO URL] {public_audio_url}")
 
         output_video_filename = f"final_video_{unique_id}.mp4"
         output_video_path = os.path.join(OUTPUTS_DIR, output_video_filename)
@@ -755,7 +747,7 @@ async def start_video_baking_pipeline(
         await download_rendered_video(cloud_job.final_video_url, output_video_path)
 
         RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path, "provider": cloud_job.provider}
-        final_video_url = f"{public_server_origin()}/static/outputs/{output_video_filename}"
+        final_video_url = static_asset_url(f"outputs/{output_video_filename}")
 
         if request.clerk_user_id:
             await record_successful_bake(
@@ -792,7 +784,7 @@ async def start_video_baking_pipeline(
             "render_id": job_id,
             "provider": cloud_job.provider,
             "final_video_url": final_video_url,
-            "check_status_url": f"{SERVER_PUBLIC_URL}/api/video-studio/render-status/{job_id}",
+            "check_status_url": api_public_url(f"video-studio/render-status/{job_id}"),
             "marketing_assets": {
                 "video_caption": f"{request.final_hook} 🤫✨",
                 "primary_ad_copy": f"Stop scrolling! 🚨 Viral {request.product_name} completely flips your setup upside down. Get 50% OFF tonight only. Free Worldwide Shipping included! {request.final_cta}",
@@ -867,7 +859,7 @@ async def get_render_status(render_id: str):
         # 🟢 تأمين إضافي دقيق: التحقق من وجود الملف الفعلي وحجمه قبل تسليم الرابط
         full_file_path = os.path.join(OUTPUTS_DIR, filename)
         if os.path.exists(full_file_path) and os.path.getsize(full_file_path) > 100 * 1024:
-            final_url = f"{SERVER_PUBLIC_URL}/static/outputs/{filename}"
+            final_url = static_asset_url(f"outputs/{filename}")
             return {"render_id": render_id, "status": "done", "final_video_url": final_url}
         else:
             return {"render_id": render_id, "status": "rendering", "final_video_url": None}
@@ -1003,8 +995,8 @@ async def get_all_published_assets_safe():
                 has_valid_audio = os.path.exists(audio_path) and os.path.getsize(audio_path) > 10 * 1024
                 
                 assets.append({
-                    "video_url": f"{SERVER_PUBLIC_URL}/static/outputs/{filename}",
-                    "audio_url": f"{SERVER_PUBLIC_URL}/static/outputs/{corresponding_audio}" if has_valid_audio else None,
+                    "video_url": static_asset_url(f"outputs/{filename}"),
+                    "audio_url": static_asset_url(f"outputs/{corresponding_audio}") if has_valid_audio else None,
                     "filename": filename,
                     "timestamp": os.path.getmtime(video_path)
                 })

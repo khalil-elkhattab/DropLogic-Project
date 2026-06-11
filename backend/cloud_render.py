@@ -113,6 +113,11 @@ def submit_json2video(
     duration: float,
 ) -> str:
     video_url, audio_url = _safe_urls(video_url, audio_url)
+    logger.info(
+        "[Json2Video] Submitting render | video=%s | audio=%s",
+        video_url[:160],
+        audio_url[:160],
+    )
     payload = {
         "comment": f"DropLogic Ad — {product_name}",
         "width": 1080,
