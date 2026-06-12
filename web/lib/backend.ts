@@ -119,7 +119,12 @@ export function isAllowedBackendUrl(url: string): boolean {
     const normalized = decodeProxyUrl(url);
     if (!normalized) return false;
 
-    const parsed = new URL(normalized);
+    let candidate = normalized;
+    if (!/^https?:\/\//i.test(candidate)) {
+      candidate = `http://${candidate.replace(/^\/+/, '')}`;
+    }
+
+    const parsed = new URL(candidate);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return false;
     }
@@ -128,18 +133,13 @@ export function isAllowedBackendUrl(url: string): boolean {
       return false;
     }
 
-    const allowedHosts = collectAllowedHosts();
-
-    if (allowedHosts.has(parsed.host) || allowedHosts.has(parsed.hostname)) {
-      return true;
-    }
-
-    // Always allow droplet static files over plain http (cloud render output).
+    // Droplet static files are always served over http://164.90.235.14:8000
     if (parsed.hostname === DROPLET_IP) {
       return true;
     }
 
-    return false;
+    const allowedHosts = collectAllowedHosts();
+    return allowedHosts.has(parsed.host) || allowedHosts.has(parsed.hostname);
   } catch {
     return false;
   }

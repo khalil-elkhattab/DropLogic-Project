@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { decodeProxyUrl, isAllowedBackendUrl } from '@/lib/backend';
+import { DROPLET_ASSET_ORIGIN, resolveProxyAssetUrl } from '@/lib/asset-proxy';
 
 export const runtime = 'nodejs';
 
-/** Proxies baked assets from the FastAPI backend for in-browser video preview (CORS / mixed-content safe). */
+/** Proxies baked assets from the FastAPI droplet for in-browser preview (CORS / mixed-content safe). */
 export async function GET(request: NextRequest) {
-  const sourceUrl = decodeProxyUrl(request.nextUrl.searchParams.get('url'));
+  const sourceUrl = resolveProxyAssetUrl(request);
 
-  if (!sourceUrl || !isAllowedBackendUrl(sourceUrl)) {
+  if (!sourceUrl) {
+    const raw = request.nextUrl.searchParams.get('url');
     return NextResponse.json(
-      { error: 'Invalid or disallowed media URL', url: sourceUrl || null },
+      {
+        error: 'Invalid or disallowed media URL',
+        hint: `Only ${DROPLET_ASSET_ORIGIN}/static/... URLs are allowed`,
+        received: raw,
+      },
       { status: 400 },
     );
   }
@@ -23,7 +28,7 @@ export async function GET(request: NextRequest) {
 
     if (!upstream.ok && upstream.status !== 206) {
       return NextResponse.json(
-        { error: `Upstream returned ${upstream.status}` },
+        { error: `Upstream returned ${upstream.status}`, sourceUrl },
         { status: upstream.status },
       );
     }
@@ -43,7 +48,8 @@ export async function GET(request: NextRequest) {
       status: upstream.status,
       headers,
     });
-  } catch {
-    return NextResponse.json({ error: 'Failed to stream media' }, { status: 502 });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Failed to stream media';
+    return NextResponse.json({ error: detail, sourceUrl }, { status: 502 });
   }
 }
