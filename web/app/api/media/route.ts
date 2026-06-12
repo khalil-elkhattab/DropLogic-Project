@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAllowedBackendUrl } from '@/lib/backend';
+import { decodeProxyUrl, isAllowedBackendUrl } from '@/lib/backend';
 
 export const runtime = 'nodejs';
 
 /** Proxies baked assets from the FastAPI backend for in-browser video preview (CORS / mixed-content safe). */
 export async function GET(request: NextRequest) {
-  const sourceUrl = request.nextUrl.searchParams.get('url');
+  const sourceUrl = decodeProxyUrl(request.nextUrl.searchParams.get('url'));
 
   if (!sourceUrl || !isAllowedBackendUrl(sourceUrl)) {
-    return NextResponse.json({ error: 'Invalid or disallowed media URL' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Invalid or disallowed media URL', url: sourceUrl || null },
+      { status: 400 },
+    );
   }
 
   try {

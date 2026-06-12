@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAllowedBackendUrl } from '@/lib/backend';
+import { decodeProxyUrl, isAllowedBackendUrl } from '@/lib/backend';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  const sourceUrl = request.nextUrl.searchParams.get('url');
+  const sourceUrl = decodeProxyUrl(request.nextUrl.searchParams.get('url'));
   const filename =
     request.nextUrl.searchParams.get('filename')?.replace(/[^\w.\-]/g, '_') ||
     'droplogic-ad.mp4';
 
   if (!sourceUrl || !isAllowedBackendUrl(sourceUrl)) {
-    return NextResponse.json({ error: 'Invalid or disallowed download URL' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Invalid or disallowed download URL', url: sourceUrl || null },
+      { status: 400 },
+    );
   }
 
   try {

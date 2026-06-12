@@ -1,4 +1,49 @@
 const DEFAULT_BACKEND_ORIGIN = 'http://164.90.235.14:8000';
+const DROPLET_IP = '164.90.235.14';
+
+/** Paths we allow media/download proxies to fetch from the backend. */
+const ALLOWED_ASSET_PATH_PREFIXES = ['/static/', '/api/'];
+
+/** Decode query param URLs (handles single/double encoding from router params). */
+export function decodeProxyUrl(raw: string | null | undefined): string {
+  if (!raw) return '';
+  let url = raw.trim();
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const decoded = decodeURIComponent(url);
+      if (decoded === url) break;
+      url = decoded;
+    } catch {
+      break;
+    }
+  }
+  return url;
+}
+
+function isSafeBackendPath(pathname: string): boolean {
+  return ALLOWED_ASSET_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+function collectAllowedHosts(): Set<string> {
+  const hosts = new Set([
+    `${DROPLET_IP}:8000`,
+    DROPLET_IP,
+    'www.droplogicai.com',
+    'droplogicai.com',
+  ]);
+
+  for (const origin of [getBackendUrl(), DEFAULT_BACKEND_ORIGIN]) {
+    try {
+      const parsed = new URL(origin);
+      hosts.add(parsed.host);
+      if (parsed.hostname) hosts.add(parsed.hostname);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return hosts;
+}
 
 /** Fix malformed values like `http:/host:8000` or bare `host:8000`. */
 export function normalizeBackendUrl(raw: string): string {
@@ -71,19 +116,30 @@ export function buildBackendAssetUrl(relativeOrAbsolute: string): string {
 
 export function isAllowedBackendUrl(url: string): boolean {
   try {
-    const parsed = new URL(url);
+    const normalized = decodeProxyUrl(url);
+    if (!normalized) return false;
+
+    const parsed = new URL(normalized);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return false;
     }
 
-    const allowedHosts = new Set([
-      new URL(getBackendUrl()).host,
-      new URL(DEFAULT_BACKEND_ORIGIN).host,
-      'www.droplogicai.com',
-      'droplogicai.com',
-    ]);
+    if (!isSafeBackendPath(parsed.pathname)) {
+      return false;
+    }
 
-    return allowedHosts.has(parsed.host);
+    const allowedHosts = collectAllowedHosts();
+
+    if (allowedHosts.has(parsed.host) || allowedHosts.has(parsed.hostname)) {
+      return true;
+    }
+
+    // Always allow droplet static files over plain http (cloud render output).
+    if (parsed.hostname === DROPLET_IP) {
+      return true;
+    }
+
+    return false;
   } catch {
     return false;
   }

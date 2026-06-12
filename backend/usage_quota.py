@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ PRO_PLAN_STATUSES = {"pro", "ltd", "credits"}
 
 # Dev fallback when Supabase is not configured
 _LOCAL_USAGE: dict[str, list[float]] = {}
+
+logger = logging.getLogger("droplogic.quota")
 
 
 @dataclass
@@ -158,23 +161,40 @@ def _local_record_usage(clerk_user_id: str) -> None:
 
 
 async def get_or_create_profile(clerk_user_id: str, email: str | None) -> dict[str, Any]:
-    if _supabase_configured():
+    if not _supabase_configured():
+        return {"clerk_user_id": clerk_user_id, "email": email, "plan_status": "free"}
+
+    try:
         profile = await _supabase_get_profile(clerk_user_id)
         if profile:
             return profile
         return await _supabase_upsert_profile(clerk_user_id, email)
-    return {"clerk_user_id": clerk_user_id, "email": email, "plan_status": "free"}
+    except Exception as exc:
+        logger.warning(
+            "Supabase profile unavailable for %s — using local free tier fallback: %s",
+            clerk_user_id,
+            exc,
+        )
+        return {"clerk_user_id": clerk_user_id, "email": email, "plan_status": "free"}
 
 
 async def evaluate_quota(clerk_user_id: str, email: str | None) -> QuotaStatus:
     profile = await get_or_create_profile(clerk_user_id, email)
     plan_status = _normalize_plan(profile.get("plan_status"))
     limit, period = _limits_for_plan(plan_status)
-
     since = _month_start_utc() if period == "monthly" else None
 
+    used = 0
     if _supabase_configured():
-        used = await _supabase_count_usage(clerk_user_id, since)
+        try:
+            used = await _supabase_count_usage(clerk_user_id, since)
+        except Exception as exc:
+            logger.warning(
+                "Supabase usage count failed for %s — using local fallback: %s",
+                clerk_user_id,
+                exc,
+            )
+            used = _local_count_usage(clerk_user_id, since)
     else:
         used = _local_count_usage(clerk_user_id, since)
 

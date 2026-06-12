@@ -611,10 +611,14 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
 # ----------------------------------------------------------------------
 @video_studio_router.get("/usage", summary="Return current video bake quota for a signed-in user")
 async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional[str] = Query(None)):
+    clean_user_id = (clerk_user_id or "").strip()
+    if not clean_user_id:
+        raise HTTPException(status_code=400, detail="clerk_user_id is required")
+
     try:
         from usage_quota import evaluate_quota
 
-        status = await evaluate_quota(clerk_user_id, email)
+        status = await evaluate_quota(clean_user_id, email)
         remaining = max(status.limit - status.used, 0)
         return {
             "success": True,
@@ -627,7 +631,19 @@ async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional
             "message": status.message,
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Unable to fetch usage quota: {exc}") from exc
+        logger.warning("Usage quota degraded to safe defaults for %s: %s", clean_user_id, exc, exc_info=True)
+        fallback_limit = int(os.getenv("FREE_TIER_VIDEO_LIMIT", "5"))
+        return {
+            "success": True,
+            "plan_status": "free",
+            "limit": fallback_limit,
+            "used": 0,
+            "remaining": fallback_limit,
+            "allowed": True,
+            "period": "lifetime",
+            "message": "Usage metrics temporarily unavailable — baking allowed.",
+            "degraded": True,
+        }
 
 
 @video_studio_router.post("/bake", summary="Bake marketing assets via Json2Video / Renderform cloud pipeline")
