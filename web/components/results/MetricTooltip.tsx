@@ -24,7 +24,7 @@ export default function MetricTooltip({ label, tip, children }: MetricTooltipPro
       </span>
       <div
         role="tooltip"
-        className="pointer-events-none absolute left-0 top-full z-30 mt-2 w-56 rounded-xl border border-emerald-500/20 bg-zinc-900/95 p-3 text-[11px] leading-snug text-zinc-300 opacity-0 shadow-2xl shadow-black/40 backdrop-blur-md transition-all duration-200 group-hover:opacity-100 group-hover:translate-y-0 translate-y-1"
+        className="pointer-events-none absolute left-0 top-full z-30 mt-2 w-56 rounded-xl border border-violet-500/20 bg-zinc-900/95 p-3 text-[11px] leading-snug text-zinc-300 opacity-0 shadow-2xl shadow-black/40 backdrop-blur-md transition-all duration-200 group-hover:opacity-100 group-hover:translate-y-0 translate-y-1"
       >
         {tip}
       </div>

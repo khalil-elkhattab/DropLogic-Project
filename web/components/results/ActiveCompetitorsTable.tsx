@@ -29,7 +29,7 @@ export default function ActiveCompetitorsTable({
     <div className="rounded-2xl border border-white/10 bg-zinc-900/60 overflow-hidden backdrop-blur-sm transition-opacity duration-700">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-zinc-900/80 px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400">
             <Store className="h-4 w-4" />
           </div>
           <div>
@@ -42,7 +42,7 @@ export default function ActiveCompetitorsTable({
             </p>
           </div>
         </div>
-        <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-300 ring-1 ring-emerald-500/20">
+        <span className="rounded-full bg-violet-500/10 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-violet-300 ring-1 ring-violet-500/20">
           Spy Mode
         </span>
       </div>
@@ -75,7 +75,7 @@ export default function ActiveCompetitorsTable({
                       <p className="font-bold text-white">{row.shop_name ?? row.domain}</p>
                       <p className="mt-0.5 font-mono text-[10px] text-zinc-500">{row.domain ?? shopUrl}</p>
                     </td>
-                    <td className="px-6 py-4 font-mono font-bold text-emerald-300">{price}</td>
+                    <td className="px-6 py-4 font-mono font-bold text-violet-300">{price}</td>
                     <td className="px-6 py-4">
                       <span className="rounded-md bg-zinc-800 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-300">
                         {row.ad_platform ?? 'Unknown'}
@@ -98,7 +98,7 @@ export default function ActiveCompetitorsTable({
                             href={row.active_ad_url!}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-white transition hover:bg-emerald-500 shadow-[0_0_20px_-6px_rgba(52,211,153,0.8)]"
+                            className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-white transition hover:bg-violet-500 shadow-[0_0_20px_-6px_rgba(139,92,246,0.8)]"
                           >
                             View Ad <ExternalLink className="h-3 w-3" />
                           </a>
@@ -132,7 +132,7 @@ function SpendBadge({ spend }: { spend?: string }) {
     level === 'high'
       ? 'text-red-400'
       : level === 'low'
-        ? 'text-emerald-400'
+        ? 'text-violet-400'
         : 'text-amber-400';
   return <span className={`font-bold ${styles}`}>{spend ?? 'Medium'}</span>;
 }

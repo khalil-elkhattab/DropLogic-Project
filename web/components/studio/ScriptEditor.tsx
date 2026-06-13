@@ -43,7 +43,7 @@ export default function ScriptEditor({ script, disabled, onChange }: ScriptEdito
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <div className="text-[9px] font-black uppercase tracking-widest text-blue-600">
+            <div className="text-[9px] font-black uppercase tracking-widest text-violet-400">
               The Hook
             </div>
             <p className="text-[10px] text-gray-400 font-medium">First 3 seconds — pick one punchy opener</p>
@@ -59,8 +59,8 @@ export default function ScriptEditor({ script, disabled, onChange }: ScriptEdito
                 key={index}
                 className={`rounded-xl border transition-all ${
                   isSelected
-                    ? 'border-black bg-black text-white shadow-sm'
-                    : 'border-black/[0.06] bg-white hover:border-black/20'
+                    ? 'border-violet-500/50 bg-violet-600/20 text-white shadow-[0_0_16px_rgba(139,92,246,0.15)]'
+                    : 'border-white/[0.08] bg-white/[0.03] hover:border-violet-500/25'
                 }`}
               >
                 <button
@@ -73,7 +73,7 @@ export default function ScriptEditor({ script, disabled, onChange }: ScriptEdito
                     Hook {index + 1}
                   </span>
                   {isSelected && (
-                    <span className="text-[8px] font-mono text-blue-400 uppercase">Selected</span>
+                    <span className="text-[8px] font-mono text-violet-300 uppercase">Selected</span>
                   )}
                 </button>
                 <textarea
@@ -82,7 +82,7 @@ export default function ScriptEditor({ script, disabled, onChange }: ScriptEdito
                   onChange={(e) => updateHookOption(index, e.target.value)}
                   rows={2}
                   className={`w-full px-3 pb-3 bg-transparent text-xs font-semibold leading-relaxed resize-none focus:outline-none ${
-                    isSelected ? 'text-white placeholder:text-white/40' : 'text-black placeholder:text-gray-400'
+                    isSelected ? 'text-white placeholder:text-white/40' : 'text-zinc-200 placeholder:text-zinc-500'
                   }`}
                   placeholder="Write a scroll-stopping hook..."
                 />
@@ -94,15 +94,15 @@ export default function ScriptEditor({ script, disabled, onChange }: ScriptEdito
 
       <section className="space-y-2">
         <div>
-          <div className="text-[9px] font-black uppercase tracking-widest text-emerald-600">The Body</div>
-          <p className="text-[10px] text-gray-400 font-medium">Main product benefits &amp; proof</p>
+          <div className="text-[9px] font-black uppercase tracking-widest text-violet-400">The Body</div>
+          <p className="text-[10px] text-zinc-500 font-medium">Main product benefits &amp; proof</p>
         </div>
         <textarea
           value={script.body}
           disabled={disabled}
           onChange={(e) => onChange({ ...script, body: e.target.value })}
           rows={4}
-          className="w-full p-3.5 rounded-xl border border-black/[0.06] bg-white text-xs font-medium leading-relaxed focus:outline-none focus:border-black transition resize-none"
+          className="w-full p-3.5 rounded-xl dl-input text-xs font-medium leading-relaxed resize-none"
           placeholder="Explain why this product wins..."
         />
       </section>
@@ -110,14 +110,14 @@ export default function ScriptEditor({ script, disabled, onChange }: ScriptEdito
       <section className="space-y-2">
         <div>
           <div className="text-[9px] font-black uppercase tracking-widest text-amber-600">The CTA</div>
-          <p className="text-[10px] text-gray-400 font-medium">Conversion closer with urgency</p>
+          <p className="text-[10px] text-zinc-500 font-medium">Conversion closer with urgency</p>
         </div>
         <textarea
           value={script.cta}
           disabled={disabled}
           onChange={(e) => onChange({ ...script, cta: e.target.value })}
           rows={3}
-          className="w-full p-3.5 rounded-xl border border-black/[0.06] bg-white text-xs font-bold leading-relaxed focus:outline-none focus:border-black transition resize-none"
+          className="w-full p-3.5 rounded-xl dl-input text-xs font-bold leading-relaxed resize-none"
           placeholder="Get 50% off today only at..."
         />
       </section>

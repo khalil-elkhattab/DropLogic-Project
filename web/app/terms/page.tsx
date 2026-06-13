@@ -15,7 +15,7 @@ export default function TermsPage() {
           applications, and related services (collectively, the &quot;Service&quot;) operated by DropLogic
           (&quot;we,&quot; &quot;us,&quot; or &quot;our&quot;). By creating an account or using the Service, you agree to be
           bound by these Terms and our{' '}
-          <a href="/privacy" className="text-blue-600 dark:text-blue-400 underline underline-offset-2">
+          <a href="/privacy" className="text-violet-400 underline underline-offset-2 hover:text-violet-300">
             Privacy Policy
           </a>
           .
@@ -59,7 +59,7 @@ export default function TermsPage() {
         <p>
           We want you to feel confident purchasing DropLogic, wherever you are in the world. If you are not
           satisfied with your purchase for any reason, you may request a full refund within{' '}
-          <strong className="text-black dark:text-white">14 days</strong> of your original payment date.
+          <strong className="text-zinc-100">14 days</strong> of your original payment date.
         </p>
         <p>This 14-Day Money-Back Guarantee applies to:</p>
         <ul className="list-disc pl-5 space-y-2">
@@ -73,7 +73,7 @@ export default function TermsPage() {
             Email{' '}
             <a
               href="mailto:support@droplogic.com"
-              className="text-blue-600 dark:text-blue-400 underline underline-offset-2"
+              className="text-violet-400 underline underline-offset-2 hover:text-violet-300"
             >
               support@droplogic.com
             </a>{' '}
@@ -185,7 +185,7 @@ export default function TermsPage() {
           Questions about these Terms or refund requests? Contact us at{' '}
           <a
             href="mailto:support@droplogic.com"
-            className="text-blue-600 dark:text-blue-400 underline underline-offset-2"
+            className="text-violet-400 underline underline-offset-2 hover:text-violet-300"
           >
             support@droplogic.com
           </a>

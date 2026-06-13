@@ -31,9 +31,9 @@ function ChartTooltip({
   if (!active || !payload?.length) return null;
   const point = payload[0].payload;
   return (
-    <div className="rounded-lg border border-emerald-500/30 bg-zinc-900/95 px-3 py-2 text-[11px] shadow-xl">
+    <div className="rounded-lg border border-violet-500/30 bg-zinc-900/95 px-3 py-2 text-[11px] shadow-xl">
       <p className="font-bold text-white">{point.label}</p>
-      <p className="text-emerald-400">{point.volume.toLocaleString()} units</p>
+      <p className="text-violet-400">{point.volume.toLocaleString()} units</p>
     </div>
   );
 }
@@ -46,7 +46,7 @@ export default function SalesTrendChart({ points, direction, deltaPct }: SalesTr
     <div className="rounded-2xl border border-white/10 bg-zinc-900/60 p-5 backdrop-blur-sm transition-opacity duration-500">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-emerald-400/80">
+          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-violet-400/80">
             // Sales Volume Trend
           </p>
           <h3 className="text-lg font-black tracking-tight text-white">Last 7 Days</h3>
@@ -54,7 +54,7 @@ export default function SalesTrendChart({ points, direction, deltaPct }: SalesTr
         <span
           className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
             direction === 'scaling'
-              ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/30'
+              ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-400/30'
               : direction === 'dying'
                 ? 'bg-red-500/15 text-red-300 ring-1 ring-red-400/30'
                 : 'bg-zinc-700/50 text-zinc-300 ring-1 ring-zinc-500/30'

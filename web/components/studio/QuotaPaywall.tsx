@@ -17,23 +17,23 @@ export default function QuotaPaywall({ visible, used, limit }: QuotaPaywallProps
   return (
     <div
       role="alert"
-      className="rounded-xl border border-amber-300/80 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-sm animate-[fadeIn_0.35s_ease-out]"
+      className="rounded-xl border border-violet-500/30 bg-gradient-to-r from-violet-500/10 to-violet-600/5 p-4 shadow-[0_0_20px_rgba(139,92,246,0.12)] animate-[fadeIn_0.35s_ease-out]"
     >
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="space-y-1">
-          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-amber-700">
+          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-violet-300">
             // Free tier limit reached
           </p>
-          <p className="text-sm font-bold text-amber-950 leading-snug">{FREE_TIER_PAYWALL_MESSAGE}</p>
+          <p className="text-sm font-bold text-zinc-100 leading-snug">{FREE_TIER_PAYWALL_MESSAGE}</p>
           {used != null && limit != null && (
-            <p className="text-[10px] font-mono text-amber-800/70">
+            <p className="text-[10px] font-mono text-zinc-400">
               Usage: {used}/{limit} lifetime videos
             </p>
           )}
         </div>
         <Link
           href="/dashboard/pricing"
-          className="inline-flex shrink-0 items-center justify-center h-10 px-5 rounded-lg bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition shadow-md"
+          className="inline-flex shrink-0 items-center justify-center h-10 px-5 rounded-lg dl-btn-primary text-[10px] uppercase tracking-widest"
         >
           View Pricing →
         </Link>

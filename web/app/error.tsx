@@ -16,15 +16,8 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
   }, [error]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#ededed] font-sans antialiased relative overflow-hidden flex flex-col items-center justify-center px-6">
-      <div
-        className="absolute inset-0 z-0 opacity-[0.06] pointer-events-none"
-        style={{
-          backgroundImage:
-            'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)',
-          backgroundSize: '40px 40px',
-        }}
-      />
+    <div className="dl-page font-sans antialiased relative overflow-hidden flex flex-col items-center justify-center px-6">
+      <div className="dl-grid-bg" />
 
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-red-600/8 rounded-full blur-[120px] pointer-events-none" />
 
@@ -45,7 +38,7 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
           Something went wrong
         </h1>
 
-        <p className="text-gray-400 text-sm md:text-base leading-relaxed mb-10">
+        <p className="text-zinc-400 text-sm md:text-base leading-relaxed mb-10">
           Our engine hit an unexpected snag. Your data is safe — try refreshing,
           or head home while we get things back online.
         </p>
@@ -54,7 +47,7 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
           <button
             type="button"
             onClick={reset}
-            className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-full bg-white/10 border border-white/10 text-white text-sm font-bold uppercase tracking-widest hover:bg-white/15 transition active:scale-[0.98] w-full sm:w-auto"
+            className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-full dl-btn-secondary text-sm uppercase tracking-widest active:scale-[0.98] w-full sm:w-auto"
           >
             <RotateCcw className="w-4 h-4" />
             Try Again
@@ -62,7 +55,7 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
 
           <Link
             href="/"
-            className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-full bg-blue-600 text-white text-sm font-bold uppercase tracking-widest hover:bg-blue-500 transition active:scale-[0.98] shadow-lg shadow-blue-600/25 w-full sm:w-auto"
+            className="inline-flex items-center justify-center gap-2 h-12 px-8 rounded-full dl-btn-primary text-sm uppercase tracking-widest active:scale-[0.98] w-full sm:w-auto"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to Home

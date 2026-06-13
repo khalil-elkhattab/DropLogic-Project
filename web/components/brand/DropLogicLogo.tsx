@@ -27,16 +27,16 @@ function LogoMark({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
 
   return (
     <div
-      className={`relative ${s.box} rounded-[10px] bg-gradient-to-br from-zinc-900 via-black to-zinc-900 border border-white/10 flex items-center justify-center shadow-lg shadow-blue-600/15 shrink-0`}
+      className={`relative ${s.box} rounded-[10px] bg-gradient-to-br from-zinc-900 via-black to-zinc-900 border border-white/10 flex items-center justify-center shadow-lg shadow-violet-500/15 shrink-0`}
       aria-hidden="true"
     >
       <Package className={`${s.pkg} text-white/90`} strokeWidth={2.25} />
       <Zap
-        className={`${s.zap} text-blue-400 absolute -top-0.5 -right-0.5`}
+        className={`${s.zap} text-violet-400 absolute -top-0.5 -right-0.5`}
         fill="currentColor"
         strokeWidth={0}
       />
-      <Cog className={`${s.cog} text-blue-500/70 absolute -bottom-0.5 -left-0.5`} strokeWidth={2.5} />
+      <Cog className={`${s.cog} text-violet-500/70 absolute -bottom-0.5 -left-0.5`} strokeWidth={2.5} />
     </div>
   );
 }
@@ -53,7 +53,7 @@ export default function DropLogicLogo({
       <LogoMark size={size} />
       {showWordmark && (
         <span className={`${wordmarkSizes[size]} font-bold tracking-tighter uppercase text-inherit`}>
-          DropLogic<span className="text-blue-600">.{suffix}</span>
+          DropLogic<span className="text-violet-400">.{suffix}</span>
         </span>
       )}
     </div>

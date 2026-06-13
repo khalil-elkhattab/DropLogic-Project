@@ -42,7 +42,7 @@ export default function NetProfitCard({ financials, loading }: NetProfitCardProp
   const marginHealthy = financials.net_profit_margin_pct >= 15;
 
   return (
-    <div className="col-span-full rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-zinc-900 via-zinc-900 to-emerald-950/40 p-6 shadow-[0_0_40px_-12px_rgba(52,211,153,0.45)] transition-all duration-500">
+    <div className="col-span-full rounded-2xl border border-violet-500/20 bg-gradient-to-br from-zinc-900 via-zinc-900 to-violet-950/40 p-6 shadow-[0_0_40px_-12px_rgba(139,92,246,0.45)] transition-all duration-500">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <MetricTooltip
           label="Net Profit Margin Calculator"
@@ -51,11 +51,11 @@ export default function NetProfitCard({ financials, loading }: NetProfitCardProp
         <span
           className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] ${
             marginHealthy
-              ? 'bg-emerald-500/20 text-emerald-300 shadow-[0_0_24px_rgba(52,211,153,0.55)] ring-1 ring-emerald-400/50'
+              ? 'bg-violet-500/20 text-violet-300 shadow-[0_0_24px_rgba(139,92,246,0.55)] ring-1 ring-violet-400/50'
               : 'bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/40'
           }`}
         >
-          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="h-2 w-2 rounded-full bg-violet-400 animate-pulse" />
           {financials.net_profit_margin_pct.toFixed(1)}% Net Margin
         </span>
       </div>
@@ -90,7 +90,7 @@ export default function NetProfitCard({ financials, loading }: NetProfitCardProp
         </p>
         <div className="text-right">
           <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Net Profit</p>
-          <p className="text-3xl font-black tracking-tight text-emerald-300 drop-shadow-[0_0_12px_rgba(52,211,153,0.5)]">
+          <p className="text-3xl font-black tracking-tight text-violet-300 drop-shadow-[0_0_12px_rgba(139,92,246,0.5)]">
             {financials.net_profit_display}
           </p>
         </div>
@@ -111,7 +111,7 @@ function InsightStat({
   sub?: string;
 }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-black/30 p-4 transition hover:border-emerald-500/20 hover:bg-black/40">
+    <div className="rounded-xl border border-white/5 bg-black/30 p-4 transition hover:border-violet-500/20 hover:bg-black/40">
       <MetricTooltip label={label} tip={tip} />
       <p className="mt-2 text-2xl font-black tracking-tight text-white">{value}</p>
       {sub && <p className="mt-1 text-[10px] font-mono text-zinc-500">{sub}</p>}

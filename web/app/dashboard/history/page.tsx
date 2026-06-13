@@ -100,20 +100,13 @@ export default function AdHistoryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white text-black font-sans antialiased relative overflow-hidden">
-      <div
-        className="absolute inset-0 z-0 opacity-[0.02] pointer-events-none"
-        style={{
-          backgroundImage:
-            'linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)',
-          backgroundSize: '20px 20px',
-        }}
-      />
+    <div className="dl-page dl-page-elevated font-sans antialiased relative overflow-hidden">
+      <div className="dl-grid-bg" />
 
-      <nav className="h-16 border-b border-black/[0.08] bg-white/90 backdrop-blur-xl flex items-center justify-between px-6 md:px-10 sticky top-0 z-50">
+      <nav className="dl-nav h-16 flex items-center justify-between px-6 md:px-10">
         <div className="flex items-center gap-6">
-          <DropLogicLogo href="/dashboard" size="md" className="italic" />
-          <span className="hidden sm:inline text-[10px] font-black uppercase tracking-[0.2em] text-black border-b-2 border-black pb-1">
+          <DropLogicLogo href="/dashboard" size="md" className="italic text-zinc-100" />
+          <span className="hidden sm:inline text-[10px] font-black uppercase tracking-[0.2em] text-violet-300 border-b-2 border-violet-500 pb-1">
             Ad History
           </span>
         </div>
@@ -121,7 +114,7 @@ export default function AdHistoryPage() {
           <button
             type="button"
             onClick={() => router.push('/dashboard/studio')}
-            className="text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-black transition"
+            className="text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-violet-300 transition"
           >
             + New Ad
           </button>
@@ -131,13 +124,13 @@ export default function AdHistoryPage() {
 
       <main className="relative z-10 max-w-6xl mx-auto px-6 md:px-10 py-10 md:py-14">
         <header className="mb-10">
-          <p className="text-[10px] font-mono font-bold text-blue-600 uppercase tracking-[0.3em] mb-2">
+          <p className="text-[10px] font-mono font-bold text-violet-400 uppercase tracking-[0.3em] mb-2">
             // Your Library
           </p>
-          <h1 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2">
+          <h1 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2 text-zinc-50">
             Generated Ads
           </h1>
-          <p className="text-sm text-gray-500 max-w-xl">
+          <p className="text-sm text-zinc-500 max-w-xl">
             Preview and re-download every video you have baked. History is tied to your account.
           </p>
         </header>
@@ -147,29 +140,29 @@ export default function AdHistoryPage() {
             {[1, 2, 3].map((slot) => (
               <div
                 key={slot}
-                className="rounded-2xl border border-black/[0.06] bg-[#fafafa] aspect-[9/16] animate-pulse"
+                className="rounded-2xl border border-white/[0.08] bg-white/[0.03] aspect-[9/16] animate-pulse"
               />
             ))}
           </div>
         )}
 
         {!isLoading && error && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center max-w-lg mx-auto">
-            <p className="text-sm font-bold text-amber-900 mb-1">Unable to load history</p>
-            <p className="text-xs text-amber-800/80">{error}</p>
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 text-center max-w-lg mx-auto">
+            <p className="text-sm font-bold text-amber-200 mb-1">Unable to load history</p>
+            <p className="text-xs text-amber-200/80">{error}</p>
           </div>
         )}
 
         {!isLoading && !error && ads.length === 0 && (
-          <div className="rounded-2xl border border-black/[0.06] bg-[#fcfcfc] p-10 text-center max-w-lg mx-auto">
-            <p className="text-sm font-bold mb-2">No ads yet</p>
-            <p className="text-xs text-gray-500 mb-6">
+          <div className="dl-glass p-10 text-center max-w-lg mx-auto">
+            <p className="text-sm font-bold mb-2 text-zinc-100">No ads yet</p>
+            <p className="text-xs text-zinc-500 mb-6">
               Bake your first video in Studio — it will appear here automatically.
             </p>
             <button
               type="button"
               onClick={() => router.push('/dashboard/studio')}
-              className="h-11 px-6 rounded-xl bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition"
+              className="h-11 px-6 rounded-xl dl-btn-primary text-[10px] uppercase tracking-widest"
             >
               Open Studio →
             </button>
@@ -181,7 +174,7 @@ export default function AdHistoryPage() {
             {ads.map((ad) => (
               <article
                 key={ad.id}
-                className="rounded-2xl border border-black/[0.06] bg-white overflow-hidden shadow-sm hover:shadow-md hover:border-black/15 transition group"
+                className="dl-glass overflow-hidden hover:border-violet-500/30 transition group"
               >
                 <div className="relative aspect-[9/16] bg-black">
                   {isAllowedBackendUrl(ad.video_url) ? (
@@ -201,15 +194,15 @@ export default function AdHistoryPage() {
 
                 <div className="p-4 space-y-3">
                   <div>
-                    <h2 className="text-sm font-black uppercase tracking-tight line-clamp-1">
+                    <h2 className="text-sm font-black uppercase tracking-tight line-clamp-1 text-zinc-100">
                       {ad.product_name}
                     </h2>
-                    <p className="text-[10px] font-mono text-gray-400 mt-1 uppercase tracking-wider">
+                    <p className="text-[10px] font-mono text-zinc-500 mt-1 uppercase tracking-wider">
                       {formatDate(ad.created_at)}
                     </p>
                   </div>
 
-                  <p className="text-[11px] text-gray-600 leading-snug line-clamp-2 italic">
+                  <p className="text-[11px] text-zinc-400 leading-snug line-clamp-2 italic">
                     &ldquo;{ad.selected_hook}&rdquo;
                   </p>
 
@@ -217,7 +210,7 @@ export default function AdHistoryPage() {
                     type="button"
                     onClick={() => handleDownload(ad)}
                     disabled={downloadingId === ad.id || !isAllowedBackendUrl(ad.video_url)}
-                    className="w-full h-10 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full h-10 rounded-xl dl-btn-primary text-[10px] uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {downloadingId === ad.id ? 'Downloading...' : '⚡ Download'}
                   </button>

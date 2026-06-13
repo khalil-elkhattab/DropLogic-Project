@@ -39,16 +39,16 @@ export default function FaqAccordion() {
   };
 
   return (
-    <section id="faq" className="px-6 md:px-8 py-20 md:py-32 bg-[#fafafa] border-y border-black/[0.05]">
+    <section id="faq" className="px-6 md:px-8 py-20 md:py-32 border-y border-white/[0.06] relative z-10">
       <div className="max-w-3xl mx-auto">
         <div className="text-center mb-12 md:mb-16">
-          <p className="text-[10px] font-mono font-bold text-blue-600 uppercase tracking-[0.3em] mb-3">
+          <p className="text-[10px] font-mono font-bold text-violet-400 uppercase tracking-[0.3em] mb-3">
             // FAQ
           </p>
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-black mb-4">
+          <h2 className="dl-section-title mb-4">
             Questions dropshippers ask us
           </h2>
-          <p className="text-gray-500 text-sm md:text-base max-w-lg mx-auto">
+          <p className="text-zinc-400 text-sm md:text-base max-w-lg mx-auto">
             Straight answers on ad safety, speed, billing, and security — before you commit.
           </p>
         </div>
@@ -60,7 +60,7 @@ export default function FaqAccordion() {
             return (
               <div
                 key={index}
-                className="bg-white rounded-2xl border border-black/[0.06] overflow-hidden transition-shadow hover:shadow-sm"
+                className="dl-glass overflow-hidden transition-shadow hover:shadow-[0_0_20px_rgba(139,92,246,0.08)]"
               >
                 <h3>
                   <button
@@ -69,11 +69,11 @@ export default function FaqAccordion() {
                     aria-expanded={isOpen}
                     aria-controls={`faq-panel-${index}`}
                     id={`faq-trigger-${index}`}
-                    className="w-full flex items-center justify-between gap-4 px-5 md:px-6 py-4 md:py-5 text-left font-bold text-sm md:text-base text-black hover:bg-gray-50/50 transition"
+                    className="w-full flex items-center justify-between gap-4 px-5 md:px-6 py-4 md:py-5 text-left font-bold text-sm md:text-base text-zinc-100 hover:bg-white/[0.03] transition"
                   >
                     <span>{item.question}</span>
                     <ChevronDown
-                      className={`w-5 h-5 text-blue-600 shrink-0 transition-transform duration-200 ${
+                      className={`w-5 h-5 text-violet-400 shrink-0 transition-transform duration-200 ${
                         isOpen ? 'rotate-180' : ''
                       }`}
                       aria-hidden="true"
@@ -89,7 +89,7 @@ export default function FaqAccordion() {
                   }`}
                 >
                   <div className="overflow-hidden">
-                    <p className="px-5 md:px-6 pb-5 text-gray-500 text-sm leading-relaxed">
+                    <p className="px-5 md:px-6 pb-5 text-zinc-400 text-sm leading-relaxed">
                       {item.answer}
                     </p>
                   </div>

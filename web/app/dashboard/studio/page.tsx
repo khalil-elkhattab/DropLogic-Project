@@ -336,42 +336,38 @@ function AIStudioContent() {
                           currentVideoUrl.includes('instagram.com');
 
   return (
-    <div className="min-h-screen bg-white text-black font-sans antialiased relative overflow-hidden flex flex-col">
+    <div className="dl-page font-sans antialiased relative overflow-hidden flex flex-col h-screen">
       
-      {/* Grid Background */}
-      <div className="absolute inset-0 z-0 opacity-[0.02] pointer-events-none" 
-           style={{ backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: '20px 20px' }}>
-      </div>
+      <div className="dl-grid-bg" />
 
-      {/* WORKSPACE NAVIGATION */}
-      <nav className="h-14 border-b border-black/[0.08] bg-white/90 backdrop-blur-md flex items-center justify-between px-6 sticky top-0 z-50 select-none relative">
+      <nav className="dl-nav h-14 flex items-center justify-between px-6 sticky top-0 z-50 select-none relative shrink-0">
         <div className="flex items-center gap-6">
-          <DropLogicLogo href="/dashboard" size="sm" suffix="Studio" className="italic" />
-          <div className="h-4 w-[1px] bg-black/10 hidden sm:block"></div>
-          <div className="hidden sm:flex items-center gap-2 text-[9px] font-mono font-bold text-gray-400 uppercase tracking-widest bg-gray-50 px-2.5 py-0.5 rounded border border-black/[0.03]">
-            Status: <span className="text-green-500 animate-pulse">TikTok_Pipeline_Only</span>
+          <DropLogicLogo href="/dashboard" size="sm" suffix="Studio" className="italic text-zinc-100" />
+          <div className="h-4 w-[1px] bg-white/10 hidden sm:block"></div>
+          <div className="hidden sm:flex items-center gap-2 text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-widest bg-white/[0.04] px-2.5 py-0.5 rounded border border-white/[0.06]">
+            Status: <span className="text-green-400 animate-pulse">TikTok_Pipeline_Only</span>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
           {videoQuota && (
-            <div className="hidden md:block text-[9px] font-mono font-bold text-gray-400 uppercase tracking-widest bg-gray-50 px-2.5 py-1 rounded border border-black/[0.03]">
+            <div className="hidden md:block text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-widest bg-white/[0.04] px-2.5 py-1 rounded border border-white/[0.06]">
               Videos:{' '}
-              <span className={freeLimitReached ? 'text-amber-600' : 'text-black'}>
+              <span className={freeLimitReached ? 'text-amber-400' : 'text-violet-300'}>
                 {videoQuota.used}/{videoQuota.limit}
               </span>
             </div>
           )}
           <button 
             onClick={() => router.push('/dashboard/results')} 
-            className="text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-black transition"
+            className="text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-violet-300 transition"
           >
             &larr; Back to Intelligence
           </button>
           <button
             onClick={handleStartRender}
             disabled={generateDisabled}
-            className={`h-9 px-5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${generateDisabled ? 'bg-gray-100 text-gray-400 border border-black/5 cursor-not-allowed' : 'bg-black text-white hover:bg-blue-600'}`}
+            className={`h-9 px-5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${generateDisabled ? 'bg-white/[0.04] text-zinc-600 border border-white/[0.06] cursor-not-allowed' : 'dl-btn-primary'}`}
           >
             {isRendering ? `Baking ${progress}%` : 'Render & Download'}
           </button>
@@ -393,31 +389,31 @@ function AIStudioContent() {
       <main className="flex-1 w-full grid grid-cols-1 lg:grid-cols-12 gap-0 relative z-10 overflow-hidden">
         
         {/* LEFT COLUMN: ONLY AI SCRIPT ENGINE */}
-        <section className="lg:col-span-3 border-r border-black/[0.06] bg-[#fcfcfc] p-6 space-y-6 overflow-y-auto h-full">
+        <section className="lg:col-span-3 border-r border-white/[0.06] bg-white/[0.02] p-6 space-y-6 overflow-y-auto h-full">
           
           <div>
-            <div className="text-[9px] font-mono font-bold text-blue-600 uppercase tracking-widest mb-1">// Creative Deployment Pipeline</div>
-            <h2 className="text-sm font-black uppercase tracking-wider text-black">Script Blueprint</h2>
-            <p className="text-gray-400 text-[11px] font-medium mt-1">
+            <div className="text-[9px] font-mono font-bold text-violet-400 uppercase tracking-widest mb-1">// Creative Deployment Pipeline</div>
+            <h2 className="text-sm font-black uppercase tracking-wider text-zinc-100">Script Blueprint</h2>
+            <p className="text-zinc-500 text-[11px] font-medium mt-1">
               Engaging narrative structures generated for your selected product asset. Preview and edit your text layers here before baking.
             </p>
-            <div className="text-[9px] font-mono text-gray-400 bg-gray-100 rounded px-2 py-1 mt-2 border border-black/[0.03]">
+            <div className="text-[9px] font-mono text-zinc-500 bg-white/[0.04] rounded px-2 py-1 mt-2 border border-white/[0.06]">
               SYST: {incomingAnalysisId ? `Analysis ${incomingAnalysisId}` : 'Studio'} · Asset {selectedCardId}
               {bakeVideoUrl ? ' · Source locked' : ' · ⚠ No source URL'}
             </div>
           </div>
 
-          <div className="h-[1px] bg-black/[0.05]"></div>
+          <div className="h-[1px] bg-white/[0.06]"></div>
 
           {/* AI Script Engine */}
           <div className="space-y-4">
             <div>
-              <div className="text-[9px] font-mono font-bold text-blue-600 uppercase tracking-widest mb-1">// Script Layering</div>
-              <h2 className="text-sm font-black uppercase tracking-wider text-black">AI Script Engine</h2>
+              <div className="text-[9px] font-mono font-bold text-violet-400 uppercase tracking-widest mb-1">// Script Layering</div>
+              <h2 className="text-sm font-black uppercase tracking-wider text-zinc-100">AI Script Engine</h2>
             </div>
 
             <div className="space-y-2">
-              <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">AI Optimized Angles</div>
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500 block">AI Optimized Angles</div>
               {[
                 { id: 'problem', title: 'Problem-Solving Angle', desc: 'Focuses on pain points and room transformation.' },
                 { id: 'viral', title: 'TikTok Viral Hook', desc: 'Uses social proof and organic trends style.' },
@@ -430,15 +426,15 @@ function AIStudioContent() {
                     setSelectedHook(hook.id);
                     fetchAiScriptAngle(hook.id);
                   }}
-                  className={`w-full text-left p-3.5 rounded-xl border transition-all flex flex-col gap-1 ${selectedHook === hook.id ? 'border-black bg-black text-white shadow-sm' : 'border-black/[0.05] bg-white text-black hover:border-black/20'} ${isGeneratingScript ? 'opacity-60 cursor-wait' : ''}`}
+                  className={`w-full text-left p-3.5 rounded-xl border transition-all flex flex-col gap-1 ${selectedHook === hook.id ? 'border-violet-500/50 bg-violet-600/20 text-white shadow-[0_0_16px_rgba(139,92,246,0.15)]' : 'border-white/[0.08] bg-white/[0.03] text-zinc-200 hover:border-violet-500/25'} ${isGeneratingScript ? 'opacity-60 cursor-wait' : ''}`}
                 >
                   <span className="text-[11px] font-bold uppercase tracking-tight flex justify-between items-center">
                     {hook.title}
                     {selectedHook === hook.id && isGeneratingScript && (
-                      <span className="text-[8px] font-mono lowercase text-blue-400 animate-pulse">generating...</span>
+                      <span className="text-[8px] font-mono lowercase text-violet-300 animate-pulse">generating...</span>
                     )}
                   </span>
-                  <span className="text-[10px] font-medium text-gray-400">{hook.desc}</span>
+                  <span className="text-[10px] font-medium text-zinc-500">{hook.desc}</span>
                 </button>
               ))}
             </div>
@@ -452,10 +448,10 @@ function AIStudioContent() {
         </section>
 
         {/* CENTER COLUMN: PREVIEW MONITOR */}
-        <section className="lg:col-span-6 bg-white flex flex-col justify-between p-6 overflow-y-auto h-full border-r border-black/[0.06]">
+        <section className="lg:col-span-6 bg-[#09090b] flex flex-col justify-between p-6 overflow-y-auto h-full border-r border-white/[0.06]">
           
           <div className="flex justify-center mb-4">
-            <div className="bg-gray-50 p-1 rounded-xl border border-black/[0.05] flex gap-1 text-[9px] font-black uppercase tracking-wider select-none">
+            <div className="bg-white/[0.04] p-1 rounded-xl border border-white/[0.06] flex gap-1 text-[9px] font-black uppercase tracking-wider select-none">
               {[
                 { id: 'reels', label: 'Phone / Reels (9:16)' },
                 { id: 'square', label: 'Instagram / Square (1:1)' },
@@ -464,7 +460,7 @@ function AIStudioContent() {
                 <button
                   key={mode.id}
                   onClick={() => setAspectRatio(mode.id)}
-                  className={`px-4 py-2 rounded-lg transition-all ${aspectRatio === mode.id ? 'bg-black text-white shadow-sm' : 'text-gray-400 hover:text-black'}`}
+                  className={`px-4 py-2 rounded-lg transition-all ${aspectRatio === mode.id ? 'bg-violet-600 text-white shadow-[0_0_12px_rgba(139,92,246,0.3)]' : 'text-zinc-500 hover:text-violet-300'}`}
                 >
                   {mode.label}
                 </button>
@@ -474,7 +470,7 @@ function AIStudioContent() {
 
           <div className="flex-1 w-full flex items-center justify-center p-4 min-h-[380px]">
             <div 
-              className={`bg-[#0d0d0d] text-white border border-black/[0.1] rounded-2xl relative overflow-hidden transition-all duration-300 shadow-2xl flex flex-col justify-between p-5 ${
+              className={`dl-video-frame bg-[#0d0d0d] text-white relative overflow-hidden transition-all duration-300 flex flex-col justify-between p-5 ${
                 aspectRatio === 'reels' ? 'aspect-[9/16] h-full max-h-[500px]' : 
                 aspectRatio === 'desktop' ? 'aspect-[16/9] w-full max-w-[620px]' : 
                 'aspect-square h-full max-h-[440px]'
@@ -520,7 +516,7 @@ function AIStudioContent() {
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-6 text-center z-10">
                 {isRendering ? (
                   <div className="space-y-3 w-full max-w-[200px] bg-black/50 p-4 rounded-xl backdrop-blur-sm">
-                    <div className="text-4xl font-black italic tracking-tighter text-blue-500 animate-pulse">{progress}%</div>
+                    <div className="text-4xl font-black italic tracking-tighter text-violet-400 animate-pulse">{progress}%</div>
                     <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.2em]">Neural Rendering...</div>
                   </div>
                 ) : (
@@ -544,36 +540,36 @@ function AIStudioContent() {
                 </p>
                 <div className="flex items-center justify-between text-[7px] font-mono text-gray-400 uppercase tracking-widest border-t border-white/5 pt-1.5">
                   <span>Voice: {selectedVoice}</span>
-                  <span className="text-blue-500">Captions Synced</span>
+                  <span className="text-violet-400">Captions Synced</span>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="mt-4 border-t border-black/[0.04] pt-4 w-full">
-            <div className="flex items-center justify-between text-[9px] font-mono font-bold text-gray-400 uppercase tracking-wider mb-2">
+          <div className="mt-4 border-t border-white/[0.06] pt-4 w-full">
+            <div className="flex items-center justify-between text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-2">
               <span>00:00 / 00:15</span>
               <span>Render Status: {isRendering ? 'Baking Asset...' : 'Idle'}</span>
             </div>
-            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden relative border border-black/[0.02]">
-              <div className="h-full bg-black transition-all duration-300" style={{ width: isRendering ? `${progress}%` : '35%' }}></div>
+            <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden relative border border-white/[0.06]">
+              <div className="h-full bg-violet-600 transition-all duration-300 shadow-[0_0_8px_rgba(139,92,246,0.5)]" style={{ width: isRendering ? `${progress}%` : '35%' }}></div>
             </div>
           </div>
         </section>
 
         {/* RIGHT COLUMN: AUDIO CORE & BRAND IDENTITY */}
-        <section className="lg:col-span-3 border-l border-black/[0.06] bg-[#fcfcfc] p-6 space-y-6 overflow-y-auto h-full">
+        <section className="lg:col-span-3 border-l border-white/[0.06] bg-white/[0.02] p-6 space-y-6 overflow-y-auto h-full">
           
           <div>
-            <div className="text-[9px] font-mono font-bold text-blue-600 uppercase tracking-widest mb-1">// Acoustics & Brand</div>
-            <h2 className="text-sm font-black uppercase tracking-wider text-black">Audio & Protection</h2>
-            <p className="text-gray-400 text-[11px] font-medium mt-1">Configure high-conversion vocal synthesis and protect your asset.</p>
+            <div className="text-[9px] font-mono font-bold text-violet-400 uppercase tracking-widest mb-1">// Acoustics & Brand</div>
+            <h2 className="text-sm font-black uppercase tracking-wider text-zinc-100">Audio & Protection</h2>
+            <p className="text-zinc-500 text-[11px] font-medium mt-1">Configure high-conversion vocal synthesis and protect your asset.</p>
           </div>
 
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">AI Voice Cloning (Speech)</div>
-              <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)} className="w-full h-11 px-3 rounded-xl bg-white border border-black/[0.06] font-bold text-xs cursor-pointer focus:outline-none focus:border-black transition">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500 block">AI Voice Cloning (Speech)</div>
+              <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)} className="w-full h-11 px-3 rounded-xl dl-input font-bold text-xs cursor-pointer">
                 <option value="premium_male">Adam (Premium Energetic Male - US)</option>
                 <option value="viral_female">Bella (TikTok Trending Female - US)</option>
                 <option value="deep_uk">Oliver (Deep Narrative - UK Accent)</option>
@@ -582,7 +578,7 @@ function AIStudioContent() {
 
             <div className="space-y-1.5">
               <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Trending E-com BG Music</div>
-              <select value={bgMusic} onChange={(e) => setBgMusic(e.target.value)} className="w-full h-11 px-3 rounded-xl bg-white border border-black/[0.06] font-bold text-xs cursor-pointer focus:outline-none focus:border-black transition">
+              <select value={bgMusic} onChange={(e) => setBgMusic(e.target.value)} className="w-full h-11 px-3 rounded-xl dl-input font-bold text-xs cursor-pointer">
                 <option value="tiktok_trend_01">Lofi Chill Beats (High Conversion)</option>
                 <option value="tiktok_trend_02">Cyberpunk Upbeat Synth</option>
                 <option value="none">No Background Music (Raw Sound)</option>
@@ -590,18 +586,18 @@ function AIStudioContent() {
             </div>
           </div>
 
-          <div className="h-[1px] bg-black/[0.05]"></div>
+          <div className="h-[1px] bg-white/[0.06]"></div>
 
-          <div className="rounded-xl border border-amber-500/25 bg-amber-50/40 p-4 space-y-3">
+          <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-[9px] font-black uppercase tracking-widest text-amber-600 block mb-1">
+                <div className="text-[9px] font-black uppercase tracking-widest text-amber-400 block mb-1">
                   // Auto Burned-In Captions
                 </div>
-                <p className="text-[11px] font-bold text-black leading-snug">
+                <p className="text-[11px] font-bold text-zinc-100 leading-snug">
                   TikTok / Hormozi style subtitles
                 </p>
-                <p className="text-[10px] text-gray-500 leading-relaxed mt-1">
+                <p className="text-[10px] text-zinc-400 leading-relaxed mt-1">
                   Syncs your hook, body, and CTA to the voiceover — bold yellow &amp; green text with black outline, baked into the final MP4.
                 </p>
               </div>
@@ -627,7 +623,7 @@ function AIStudioContent() {
                 {['bold outline', 'lower-third', 'hook → body → cta'].map((tag) => (
                   <span
                     key={tag}
-                    className="text-[8px] font-mono font-bold uppercase tracking-wider text-amber-800 bg-white border border-amber-200/60 px-2 py-0.5 rounded"
+                    className="text-[8px] font-mono font-bold uppercase tracking-wider text-amber-200 bg-white/[0.06] border border-amber-500/30 px-2 py-0.5 rounded"
                   >
                     {tag}
                   </span>
@@ -636,16 +632,16 @@ function AIStudioContent() {
             )}
           </div>
 
-          <div className="rounded-xl border border-blue-600/20 bg-blue-50/50 p-4 space-y-3">
+          <div className="rounded-xl border border-violet-500/25 bg-violet-500/10 p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-[9px] font-black uppercase tracking-widest text-blue-600 block mb-1">
+                <div className="text-[9px] font-black uppercase tracking-widest text-violet-400 block mb-1">
                   // Anti-Ban Smart Filter
                 </div>
-                <p className="text-[11px] font-bold text-black leading-snug">
+                <p className="text-[11px] font-bold text-zinc-100 leading-snug">
                   Uniquify video for TikTok
                 </p>
-                <p className="text-[10px] text-gray-500 leading-relaxed mt-1">
+                <p className="text-[10px] text-zinc-400 leading-relaxed mt-1">
                   Mirrors, micro-speed shifts, and color grading to bypass duplicate-content detection.
                 </p>
               </div>
@@ -656,7 +652,7 @@ function AIStudioContent() {
                 aria-label="Anti-Ban Smart Filter"
                 onClick={() => setAntiBanFilter((on) => !on)}
                 className={`relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 ${
-                  antiBanFilter ? 'bg-blue-600' : 'bg-gray-300'
+                  antiBanFilter ? 'bg-violet-600' : 'bg-zinc-600'
                 }`}
               >
                 <span
@@ -671,7 +667,7 @@ function AIStudioContent() {
                 {['hflip', 'setpts 1.03', 'atempo 0.97', 'color grade'].map((tag) => (
                   <span
                     key={tag}
-                    className="text-[8px] font-mono font-bold uppercase tracking-wider text-blue-700 bg-white border border-blue-200/60 px-2 py-0.5 rounded"
+                    className="text-[8px] font-mono font-bold uppercase tracking-wider text-violet-200 bg-white/[0.06] border border-violet-500/30 px-2 py-0.5 rounded"
                   >
                     {tag}
                   </span>
@@ -683,16 +679,16 @@ function AIStudioContent() {
           <div className="space-y-1.5">
             <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Overlay Watermark / Brand Logo</div>
             <input type="file" accept="image/*" ref={fileInputRef} onChange={handleLogoUpload} className="hidden" />
-            <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-11 px-4 rounded-xl bg-white border border-black/[0.06] border-dashed font-bold text-xs hover:bg-black hover:text-white transition text-center flex items-center justify-center gap-2 shadow-sm">
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-11 px-4 rounded-xl dl-input border-dashed font-bold text-xs hover:bg-violet-600/20 hover:border-violet-500/40 transition text-center flex items-center justify-center gap-2">
               {logoImage ? "🔄 Change Uploaded Logo" : "📤 Upload Brand Logo (.PNG)"}
             </button>
-            <p className="text-[10px] font-mono text-gray-400 leading-normal pt-1">
+            <p className="text-[10px] font-mono text-zinc-500 leading-normal pt-1">
               Upload your transparent PNG store logo to lock it onto the video canvas and protect your engineered ad asset from other drop-shippers.
             </p>
           </div>
 
           <div className="pt-4 space-y-3">
-            <p className="text-[9px] font-mono text-gray-400 text-center uppercase tracking-widest">
+            <p className="text-[9px] font-mono text-zinc-500 text-center uppercase tracking-widest">
               {freeLimitReached
                 ? 'Upgrade to continue generating'
                 : 'Edit script above, then generate voice'}
@@ -701,7 +697,7 @@ function AIStudioContent() {
               type="button"
               onClick={handleStartRender}
               disabled={generateDisabled}
-              className={`w-full h-12 rounded-xl font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] shadow-md ${generateDisabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-black/5' : 'bg-black text-white hover:bg-blue-600 shadow-blue-600/10'}`}
+              className={`w-full h-12 rounded-xl font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] ${generateDisabled ? 'bg-white/[0.04] text-zinc-600 cursor-not-allowed border border-white/[0.06]' : 'dl-btn-primary'}`}
             >
               {isRendering
                 ? 'Processing...'
@@ -721,7 +717,7 @@ export default function AIStudioPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-white text-black font-mono flex items-center justify-center text-xs">
+        <div className="dl-page text-zinc-400 font-mono flex items-center justify-center text-xs">
           // Loading studio workspace...
         </div>
       }

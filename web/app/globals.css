@@ -1,26 +1,133 @@
 @import "tailwindcss";
 
+/* ─── DropLogic Cinematic Dark Design System ─── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --dl-bg: #09090b;
+  --dl-bg-elevated: #0b0f19;
+  --dl-glass: rgba(20, 20, 25, 0.7);
+  --dl-glass-border: rgba(255, 255, 255, 0.08);
+  --dl-accent: #8b5cf6;
+  --dl-accent-hover: #7c3aed;
+  --dl-accent-muted: rgba(139, 92, 246, 0.15);
+  --dl-text: #f4f4f5;
+  --dl-text-muted: #a1a1aa;
+  --dl-text-dim: #71717a;
+  --dl-glow: 0 0 20px rgba(139, 92, 246, 0.15);
+  --dl-glow-strong: 0 0 32px rgba(139, 92, 246, 0.28);
+  --dl-radius: 12px;
+  --dl-radius-lg: 16px;
+  --background: var(--dl-bg);
+  --foreground: var(--dl-text);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-dl-bg: #09090b;
+  --color-dl-elevated: #0b0f19;
+  --color-dl-accent: #8b5cf6;
+  --color-dl-accent-hover: #7c3aed;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--dl-bg);
+    color: var(--dl-text);
+    font-family: var(--font-sans), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: rgba(139, 92, 246, 0.35);
+    color: #fff;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .dl-page {
+    @apply min-h-screen text-zinc-100 antialiased relative overflow-x-hidden;
+    background: var(--dl-bg);
+  }
+
+  .dl-page-elevated {
+    background: linear-gradient(180deg, var(--dl-bg) 0%, var(--dl-bg-elevated) 100%);
+  }
+
+  .dl-grid-bg {
+    @apply absolute inset-0 z-0 pointer-events-none opacity-[0.04];
+    background-image: linear-gradient(rgba(139, 92, 246, 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(139, 92, 246, 0.35) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .dl-glass {
+    background: var(--dl-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--dl-glass-border);
+    border-radius: var(--dl-radius-lg);
+  }
+
+  .dl-glass-subtle {
+    @apply bg-white/[0.03] backdrop-blur-md border border-white/[0.06] rounded-xl;
+  }
+
+  .dl-nav {
+    @apply sticky top-0 z-50 border-b border-white/[0.08] backdrop-blur-xl;
+    background: rgba(9, 9, 11, 0.85);
+  }
+
+  .dl-btn-primary {
+    @apply inline-flex items-center justify-center font-bold uppercase tracking-wider transition-all active:scale-[0.98];
+    background: linear-gradient(135deg, var(--dl-accent) 0%, var(--dl-accent-hover) 100%);
+    color: #fff;
+    border-radius: var(--dl-radius);
+    box-shadow: var(--dl-glow);
+  }
+
+  .dl-btn-primary:hover {
+    box-shadow: var(--dl-glow-strong);
+    filter: brightness(1.08);
+  }
+
+  .dl-btn-primary:disabled {
+    @apply opacity-40 cursor-not-allowed;
+    box-shadow: none;
+    filter: none;
+  }
+
+  .dl-btn-secondary {
+    @apply inline-flex items-center justify-center font-bold border border-white/[0.12] text-zinc-200 bg-white/[0.04] hover:bg-white/[0.08] transition-all rounded-xl;
+  }
+
+  .dl-input {
+    @apply w-full bg-white/[0.04] border border-white/[0.08] text-zinc-100 placeholder:text-zinc-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500/30 transition-all;
+  }
+
+  .dl-video-frame {
+    @apply relative overflow-hidden rounded-2xl border border-white/[0.1];
+    box-shadow: var(--dl-glow), 0 24px 48px -12px rgba(0, 0, 0, 0.6);
+  }
+
+  .dl-accent-text {
+    @apply text-violet-400;
+  }
+
+  .dl-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-widest border border-violet-500/25 bg-violet-500/10 text-violet-300;
+  }
+
+  .dl-section-title {
+    @apply text-3xl md:text-4xl font-bold tracking-tight text-zinc-50;
+  }
+
+  .dl-muted {
+    @apply text-zinc-400;
+  }
 }

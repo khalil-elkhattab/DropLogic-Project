@@ -26,24 +26,24 @@ export default function PrivacyPage() {
         <p>We may collect the following categories of personal information:</p>
         <ul className="list-disc pl-5 space-y-2">
           <li>
-            <strong className="text-black dark:text-white">Account information:</strong> name, email
+            <strong className="text-zinc-100">Account information:</strong> name, email
             address, and authentication credentials provided through our identity provider (Clerk).
           </li>
           <li>
-            <strong className="text-black dark:text-white">Payment information:</strong> billing details
+            <strong className="text-zinc-100">Payment information:</strong> billing details
             processed by our payment partner, Lemon Squeezy. We do not store full payment card numbers on
             our servers.
           </li>
           <li>
-            <strong className="text-black dark:text-white">Usage data:</strong> pages visited, features
+            <strong className="text-zinc-100">Usage data:</strong> pages visited, features
             used, session duration, IP address, browser type, device information, and referring URLs.
           </li>
           <li>
-            <strong className="text-black dark:text-white">Content you submit:</strong> product keywords,
+            <strong className="text-zinc-100">Content you submit:</strong> product keywords,
             links, scripts, and other inputs you provide to generate analyses or media.
           </li>
           <li>
-            <strong className="text-black dark:text-white">Cookies and similar technologies:</strong> data
+            <strong className="text-zinc-100">Cookies and similar technologies:</strong> data
             collected through cookies, local storage, and similar tools as described in Section 8.
           </li>
         </ul>
@@ -74,16 +74,16 @@ export default function PrivacyPage() {
         <p>We do not sell your personal information. We may share data with:</p>
         <ul className="list-disc pl-5 space-y-2">
           <li>
-            <strong className="text-black dark:text-white">Service providers:</strong> hosting, authentication
+            <strong className="text-zinc-100">Service providers:</strong> hosting, authentication
             (Clerk), payments (Lemon Squeezy), database (Supabase), analytics, and customer support tools
             that process data on our behalf under contractual safeguards.
           </li>
           <li>
-            <strong className="text-black dark:text-white">Legal requirements:</strong> when required by law,
+            <strong className="text-zinc-100">Legal requirements:</strong> when required by law,
             court order, or governmental request, or to protect our rights and users&apos; safety.
           </li>
           <li>
-            <strong className="text-black dark:text-white">Business transfers:</strong> in connection with a
+            <strong className="text-zinc-100">Business transfers:</strong> in connection with a
             merger, acquisition, or sale of assets, subject to continued protection of your data.
           </li>
         </ul>
@@ -121,7 +121,7 @@ export default function PrivacyPage() {
           rights, contact us at{' '}
           <a
             href="mailto:privacy@droplogic.com"
-            className="text-blue-600 dark:text-blue-400 underline underline-offset-2"
+            className="text-violet-400 underline underline-offset-2 hover:text-violet-300"
           >
             privacy@droplogic.com
           </a>
@@ -159,7 +159,7 @@ export default function PrivacyPage() {
           For privacy-related questions or requests, contact us at{' '}
           <a
             href="mailto:privacy@droplogic.com"
-            className="text-blue-600 dark:text-blue-400 underline underline-offset-2"
+            className="text-violet-400 underline underline-offset-2 hover:text-violet-300"
           >
             privacy@droplogic.com
           </a>
