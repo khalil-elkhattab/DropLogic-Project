@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { DROPLET_ASSET_ORIGIN, resolveProxyAssetUrl } from '@/lib/asset-proxy';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 /** Proxies baked assets from the FastAPI droplet for in-browser preview (CORS / mixed-content safe). */
 export async function GET(request: NextRequest) {

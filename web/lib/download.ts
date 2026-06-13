@@ -1,4 +1,5 @@
-import { buildBackendAssetUrl, isAllowedBackendUrl } from '@/lib/backend';
+import { normalizeDropletAssetUrl } from '@/lib/asset-proxy';
+import { buildBackendAssetUrl } from '@/lib/backend';
 
 /**
  * Trigger a browser file download for a baked MP4 (via same-origin /api/download proxy).
@@ -8,14 +9,16 @@ export async function downloadVideoFile(
   filename?: string,
 ): Promise<void> {
   const absolute = buildBackendAssetUrl(videoUrl);
-  if (!isAllowedBackendUrl(absolute)) {
+  const normalized = normalizeDropletAssetUrl(absolute);
+
+  if (!normalized) {
     throw new Error('Download URL is not allowed');
   }
 
   const name = filename || `droplogic-ad-${Date.now()}.mp4`;
-  const downloadUrl = `/api/download?url=${encodeURIComponent(absolute)}&filename=${encodeURIComponent(name)}`;
+  const downloadUrl = `/api/download?url=${encodeURIComponent(normalized)}&filename=${encodeURIComponent(name)}`;
 
-  const response = await fetch(downloadUrl);
+  const response = await fetch(downloadUrl, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`Download failed (${response.status})`);
   }
