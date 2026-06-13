@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   DROPLET_ASSET_ORIGIN,
   extractAssetUrlParam,
+  fullyDecodeUrl,
   normalizeDropletAssetUrl,
 } from '@/lib/asset-proxy';
 
@@ -18,20 +19,37 @@ function resolveFilename(request: NextRequest, sourceUrl: string): string {
   return basename.replace(/[^\w.\-]/g, '_') || 'droplogic-ad.mp4';
 }
 
+function resolveDownloadUrl(request: NextRequest): { raw: string; sourceUrl: string | null } {
+  const candidates = [
+    extractAssetUrlParam(request),
+    request.nextUrl.searchParams.get('url') || '',
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const decoded = fullyDecodeUrl(candidate);
+    const sourceUrl = normalizeDropletAssetUrl(decoded);
+    if (sourceUrl) {
+      return { raw: decoded, sourceUrl };
+    }
+  }
+
+  return { raw: candidates[0] || '', sourceUrl: null };
+}
+
 /**
  * Proxy download from the FastAPI droplet.
- * Allows plain http://164.90.235.14:8000/static/... (no HTTPS on :8000).
+ * Any URL containing 164.90.235.14 + /static/ is allowed over plain HTTP.
  */
 export async function GET(request: NextRequest) {
-  const rawParam = extractAssetUrlParam(request);
-  const sourceUrl = normalizeDropletAssetUrl(rawParam);
+  const { raw, sourceUrl } = resolveDownloadUrl(request);
 
   if (!sourceUrl) {
     return NextResponse.json(
       {
         error: 'Invalid or disallowed download URL',
-        hint: `Only ${DROPLET_ASSET_ORIGIN}/static/... URLs are allowed (http is OK for droplet)`,
-        received: rawParam || request.nextUrl.searchParams.get('url'),
+        hint: `URL must contain ${DROPLET_ASSET_ORIGIN} and /static/`,
+        received: raw || request.nextUrl.searchParams.get('url'),
       },
       { status: 400 },
     );
@@ -52,10 +70,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const upstreamType = upstream.headers.get('content-type') || '';
-    const contentType = upstreamType.includes('video') || sourceUrl.endsWith('.mp4')
-      ? 'video/mp4'
-      : upstreamType || 'application/octet-stream';
+    const contentType =
+      sourceUrl.endsWith('.mp4') || (upstream.headers.get('content-type') || '').includes('video')
+        ? 'video/mp4'
+        : upstream.headers.get('content-type') || 'application/octet-stream';
 
     return new NextResponse(upstream.body, {
       status: 200,
@@ -63,7 +81,6 @@ export async function GET(request: NextRequest) {
         'Content-Type': contentType,
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store, no-cache, must-revalidate',
-        'Access-Control-Allow-Origin': '*',
       },
     });
   } catch (error) {
