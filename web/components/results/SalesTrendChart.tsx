@@ -66,8 +66,8 @@ export default function SalesTrendChart({ points, direction, deltaPct }: SalesTr
         </span>
       </div>
 
-      <div className="h-44 w-full">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="w-full" style={{ minHeight: 300 }}>
+        <ResponsiveContainer width="100%" height={300}>
           <AreaChart data={points} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
             <defs>
               <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">

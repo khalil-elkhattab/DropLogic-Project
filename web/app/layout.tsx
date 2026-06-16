@@ -6,6 +6,9 @@ import ClerkProviderWrapper from './ClerkProviderWrapper'
 import CookieConsent from '@/components/CookieConsent'
 import { siteConfig } from '@/lib/site'
 
+/** Clerk auth components cannot run during static prerender without env keys. */
+export const dynamic = 'force-dynamic'
+
 const inter = Inter({ subsets: ['latin'] })
 
 const ogImage = {

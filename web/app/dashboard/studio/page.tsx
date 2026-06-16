@@ -9,6 +9,7 @@ import ScriptEditor, {
   type AdScript,
 } from '@/components/studio/ScriptEditor';
 import QuotaPaywall from '@/components/studio/QuotaPaywall';
+import ProxiedVideoPlayer from '@/components/results/ProxiedVideoPlayer';
 import { getApiUrl, resolveBakedVideoUrl } from '@/lib/backend';
 import { downloadVideoFile } from '@/lib/download';
 import { resolveBakeVideoUrl, resolvePreviewVideoUrl } from '@/lib/video-url';
@@ -487,15 +488,18 @@ function AIStudioContent() {
                     allowFullScreen
                   />
                 ) : (
-                  <video
+                  <ProxiedVideoPlayer
                     key={currentVideoUrl}
                     src={currentVideoUrl}
+                    fillFrame
+                    variant="fill"
                     autoPlay
                     loop
                     muted
                     controls
-                    playsInline
-                    className="w-full h-full object-contain opacity-80"
+                    preload="auto"
+                    className="absolute inset-0 h-full w-full object-cover opacity-90"
+                    label={`Studio preview: ${incomingTitle}`}
                   />
                 )}
               </div>

@@ -8,6 +8,7 @@ import { UserButton } from "@clerk/clerk-react";
 
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import TikTokPreviewOverlay from '@/components/publish/TikTokPreviewOverlay';
+import ProxiedVideoPlayer from '@/components/results/ProxiedVideoPlayer';
 import { buildBackendAssetUrl, getApiUrl, resolveBakedVideoUrl } from '@/lib/backend';
 import { downloadVideoFile } from '@/lib/download';
 
@@ -355,19 +356,16 @@ function SuccessPublishContent() {
 
             {!isLoading && previewVideoUrl && (
               <div className="w-full max-w-sm space-y-3">
-                <div className="relative w-full aspect-[9/16] dl-video-frame rounded-lg overflow-hidden bg-black">
-                  <video
+                <div className="relative w-full max-w-sm aspect-[9/16] dl-video-frame rounded-lg overflow-hidden bg-black mx-auto">
+                  <ProxiedVideoPlayer
                     key={previewVideoUrl}
-                    controls={!showTikTokOverlay}
-                    playsInline
-                    preload="metadata"
                     src={previewVideoUrl}
-                    onError={() =>
-                      setLoadError(
-                        'Your video could not be loaded. Confirm baking finished, then refresh this page.',
-                      )
-                    }
-                    className="absolute inset-0 w-full h-full object-contain bg-black"
+                    fillFrame
+                    variant="fill"
+                    controls={!showTikTokOverlay}
+                    muted={false}
+                    preload="auto"
+                    label="Baked ad preview"
                   />
                   {showTikTokOverlay && (
                     <TikTokPreviewOverlay caption={aiAdData.caption} />

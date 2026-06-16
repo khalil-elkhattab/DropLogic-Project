@@ -7,7 +7,7 @@ import asyncio
 import time
 import logging
 import traceback
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, APIRouter
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -42,7 +42,13 @@ from usage_quota import QuotaExceededError, enforce_bake_quota, record_successfu
 from cleanup_assets import cleanup_bake_temp_assets
 from ad_history import fetch_generated_ads, save_generated_ad
 from product_insights import build_active_competitors, build_financials, build_sales_trend
-from media_downloader import coerce_media_url, probe_media_url, resolve_bake_video_url, sanitize_asset_record
+from media_downloader import (
+    cache_scraped_video,
+    coerce_media_url,
+    probe_media_url,
+    resolve_bake_video_url,
+    sanitize_asset_record,
+)
 from url_utils import sanitize_download_url
 from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
 from public_urls import api_public_url, backend_public_origin, static_asset_url
@@ -360,10 +366,21 @@ async def _execute_analysis(clean_input: str) -> dict[str, Any]:
     sanitized_assets = []
     for asset in video_assets:
         cleaned = sanitize_asset_record(asset, backend_public_url=SERVER_PUBLIC_URL)
-        if cleaned:
-            sanitized_assets.append(cleaned)
-        else:
+        if not cleaned:
             logger.warning("Skipping analysis asset with invalid/blocked video_url: %r", asset)
+            continue
+
+        cached_url = await cache_scraped_video(
+            cleaned["video_url"],
+            asset_id=str(cleaned.get("id") or "asset"),
+            backend_public_url=SERVER_PUBLIC_URL,
+            outputs_dir=OUTPUTS_DIR,
+            static_url_builder=static_asset_url,
+        )
+        if cached_url:
+            cleaned["video_url"] = cached_url
+
+        sanitized_assets.append(cleaned)
 
     return {
         "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
@@ -937,7 +954,7 @@ app.include_router(ads_router)
 # 3. Video Proxy Stream Engine (CORS / Hotlinking Bypass)
 # ----------------------------------------------------------------------
 @app.get("/api/proxy-video", summary="Stream external videos safely via Backend to bypass CORS / Hotlinking restrictions")
-async def proxy_video(url: str = Query(..., description="The raw external video source URL")):
+async def proxy_video(request: Request, url: str = Query(..., description="The raw external video source URL")):
     safe_url = coerce_media_url(url, backend_public_url=SERVER_PUBLIC_URL)
     if not safe_url:
         logger.warning("Proxy rejected invalid/blocked URL %r", url)
@@ -946,23 +963,31 @@ async def proxy_video(url: str = Query(..., description="The raw external video 
             detail="Invalid or blocked video URL. URLs must include https:// (or // prefix).",
         )
 
+    range_header = request.headers.get("range")
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "*/*",
         "Accept-Encoding": "identity;q=1, *;q=0",
         "Referer": "https://www.tiktok.com/",
-        "Connection": "keep-alive"
+        "Connection": "keep-alive",
     }
+    if range_header:
+        headers["Range"] = range_header
 
     async def video_chunk_generator():
         async with httpx.AsyncClient(follow_redirects=True) as client:
             try:
                 async with client.stream("GET", safe_url, headers=headers, timeout=25.0) as response:
-                    if response.status_code in [200, 206]:
+                    if response.status_code in (200, 206):
                         async for chunk in response.aiter_bytes(chunk_size=1024 * 64):
                             yield chunk
                     else:
-                        print(f"[-] CDN rejected proxy request with status: {response.status_code}")
+                        logger.warning(
+                            "CDN rejected proxy request (%s) for %s",
+                            response.status_code,
+                            safe_url[:120],
+                        )
                         yield b""
             except httpx.UnsupportedProtocol as stream_err:
                 logger.warning("Proxy protocol error for %r: %s", safe_url[:120], stream_err)
@@ -971,14 +996,17 @@ async def proxy_video(url: str = Query(..., description="The raw external video 
                 logger.warning("Proxy stream error for %r: %s", safe_url[:120], stream_err)
                 yield b""
 
+    response_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length",
+        "Accept-Ranges": "bytes",
+    }
+
     return StreamingResponse(
         video_chunk_generator(),
         media_type="video/mp4",
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Accept-Ranges": "bytes"
-        }
+        headers=response_headers,
     )
 
 

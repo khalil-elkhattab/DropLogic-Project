@@ -29,10 +29,6 @@ const nextConfig: NextConfig = {
       // Paths without a matching file in app/api/ — proxy straight to FastAPI.
       beforeFiles: [
         {
-          source: "/api/proxy-video",
-          destination: `${backend}/api/proxy-video`,
-        },
-        {
           source: "/api/video-studio/bake",
           destination: `${backend}/api/video-studio/bake`,
         },

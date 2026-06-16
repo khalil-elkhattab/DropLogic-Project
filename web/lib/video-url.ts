@@ -2,11 +2,30 @@
  * Resolve TikTok / proxy URLs for preview (browser) vs cloud bake (absolute https).
  */
 
+import { DROPLET_ASSET_ORIGIN, isDropletStaticUrl } from '@/lib/asset-proxy';
+
 /** Build same-origin proxy URL for in-browser <video> preview. */
 export function toProxyPreviewUrl(rawUrl: string): string {
   const source = extractSourceVideoUrl(rawUrl);
   if (!source) return '';
   return `/api/proxy-video?url=${encodeURIComponent(source)}`;
+}
+
+/**
+ * Pick the best same-origin preview URL: droplet static → /api/media, external CDN → /api/proxy-video.
+ */
+export function toVideoPreviewUrl(rawUrl: string): string {
+  const source = extractSourceVideoUrl(rawUrl);
+  if (!source) return '';
+
+  if (isDropletStaticUrl(source) || source.includes('/static/')) {
+    const absolute = source.startsWith('http')
+      ? source
+      : `${DROPLET_ASSET_ORIGIN}${source.startsWith('/') ? source : `/${source}`}`;
+    return `/api/media?url=${encodeURIComponent(absolute)}`;
+  }
+
+  return toProxyPreviewUrl(source);
 }
 
 /**
@@ -62,7 +81,7 @@ export function resolvePreviewVideoUrl(...candidates: Array<string | null | unde
     }
     const source = extractSourceVideoUrl(trimmed);
     if (source) {
-      return toProxyPreviewUrl(source);
+      return toVideoPreviewUrl(source);
     }
   }
   return '';

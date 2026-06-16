@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
+import re
 from typing import Any
 
 import httpx
@@ -147,3 +150,59 @@ def sanitize_asset_record(asset: dict[str, Any], *, backend_public_url: str) -> 
 
     cleaned["video_url"] = safe_video
     return cleaned
+
+
+def _static_host_marker(backend_public_url: str) -> str:
+    """Hostname fragment used to detect already-cached droplet assets."""
+    text = (backend_public_url or "").strip()
+    if "://" in text:
+        return text.split("://", 1)[1].split("/")[0].lower()
+    return text.split("/")[0].lower()
+
+
+def is_cached_static_video(url: str, *, backend_public_url: str) -> bool:
+    lowered = (url or "").lower()
+    return "/static/" in lowered and _static_host_marker(backend_public_url) in lowered
+
+
+async def cache_scraped_video(
+    raw_url: str,
+    *,
+    asset_id: str,
+    backend_public_url: str,
+    outputs_dir: str,
+    static_url_builder,
+) -> str | None:
+    """
+    Download a TikTok/CDN clip to ``static/outputs/scraped/`` so previews survive
+    expired signed URLs. Returns absolute static URL, original URL on failure, or None.
+    """
+    safe_url = coerce_media_url(raw_url, backend_public_url=backend_public_url)
+    if not safe_url:
+        return None
+
+    if is_cached_static_video(safe_url, backend_public_url=backend_public_url):
+        return safe_url
+
+    scraped_dir = os.path.join(outputs_dir, "scraped")
+    os.makedirs(scraped_dir, exist_ok=True)
+
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", (asset_id or "asset").strip())[:40] or "asset"
+    digest = hashlib.md5(safe_url.encode("utf-8")).hexdigest()[:10]
+    filename = f"{slug}_{digest}.mp4"
+    output_path = os.path.join(scraped_dir, filename)
+
+    if os.path.isfile(output_path) and os.path.getsize(output_path) > 1024:
+        return static_url_builder(f"outputs/scraped/{filename}")
+
+    ok = await download_media_to_file(
+        safe_url,
+        output_path,
+        backend_public_url=backend_public_url,
+    )
+    if ok:
+        logger.info("Cached scraped video → outputs/scraped/%s", filename)
+        return static_url_builder(f"outputs/scraped/{filename}")
+
+    logger.warning("Could not cache scraped video; keeping CDN URL for proxy: %s", safe_url[:120])
+    return safe_url

@@ -10,7 +10,8 @@ import ActiveCompetitorsTable from '@/components/results/ActiveCompetitorsTable'
 import MetricTooltip from '@/components/results/MetricTooltip';
 import type { AnalysisPayload, RawAsset } from '@/lib/analysis-types';
 import type { ActiveCompetitor } from '@/components/results/ActiveCompetitorsTable';
-import { resolveBakeVideoUrl, toProxyPreviewUrl } from '@/lib/video-url';
+import { resolveBakeVideoUrl, toVideoPreviewUrl } from '@/lib/video-url';
+import ProxiedVideoPlayer from '@/components/results/ProxiedVideoPlayer';
 
 // Same-origin paths — proxied to FastAPI via next.config.ts rewrites (no mixed content)
 const RUN_ANALYSIS_API_URL = '/api/run-analysis';
@@ -59,7 +60,7 @@ function mapAsset(asset: RawAsset, index: number) {
     title: asset.title || asset.desc || `Raw Asset # ${index + 1}`,
     duration: asset.duration || '0:15',
     source_video_url: sourceVideoUrl,
-    video_url: sourceVideoUrl ? toProxyPreviewUrl(sourceVideoUrl) : '',
+    video_url: sourceVideoUrl ? toVideoPreviewUrl(sourceVideoUrl) : '',
     platform: asset.platform || 'TikTok',
   };
 }
@@ -440,18 +441,19 @@ function DashboardContent() {
                 </div>
 
                 {selectedVideo && selectedVideo.video_url && selectedVideo.id !== 'DL-EMPTY' && (
-                  <div className="w-full rounded-2xl overflow-hidden bg-black aspect-video relative border border-white/10 shadow-2xl">
-                    <div className="absolute top-4 left-4 z-20 bg-black/70 backdrop-blur-md text-[9px] font-mono font-bold text-white px-3 py-1 rounded-full uppercase tracking-widest">
+                  <div className="relative w-full">
+                    <div className="absolute top-4 left-4 z-20 bg-black/70 backdrop-blur-md text-[9px] font-mono font-bold text-white px-3 py-1 rounded-full uppercase tracking-widest pointer-events-none">
                       Active: {selectedVideo.title}
                     </div>
-                    <video
+                    <ProxiedVideoPlayer
                       key={selectedVideo.id}
                       src={selectedVideo.video_url}
-                      controls
+                      variant="vertical"
                       autoPlay
                       muted
-                      className="w-full h-full object-cover"
-                      playsInline
+                      controls
+                      preload="auto"
+                      label={`Preview: ${selectedVideo.title}`}
                     />
                   </div>
                 )}
@@ -499,19 +501,13 @@ function DashboardContent() {
                             </span>
                           </div>
                           {hasValidVideo && (
-                            <div className="w-full rounded-lg overflow-hidden bg-black aspect-video">
-                              <video
+                            <div className="relative w-full aspect-[9/16] overflow-hidden rounded-lg bg-black">
+                              <ProxiedVideoPlayer
                                 src={video.video_url}
-                                muted
-                                playsInline
-                                preload="metadata"
-                                className="w-full h-full object-cover pointer-events-none"
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.play().catch(() => undefined);
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.pause();
-                                }}
+                                fillFrame
+                                controls={false}
+                                onMouseEnterPlay
+                                preload="auto"
                               />
                             </div>
                           )}
