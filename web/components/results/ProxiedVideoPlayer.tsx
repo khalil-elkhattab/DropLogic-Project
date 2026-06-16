@@ -53,6 +53,13 @@ export default function ProxiedVideoPlayer({
     }
   }, []);
 
+  const handleSeamlessLoop = useCallback(() => {
+    const el = videoRef.current;
+    if (!el || !loop || userPausedRef.current) return;
+    el.currentTime = 0;
+    void el.play().catch(() => undefined);
+  }, [loop]);
+
   useEffect(() => {
     const el = videoRef.current;
     if (!el || !src) return;
@@ -171,6 +178,7 @@ export default function ProxiedVideoPlayer({
       onPlaying={() => {
         setIsBuffering(false);
       }}
+      onEnded={loop ? handleSeamlessLoop : undefined}
       onTimeUpdate={() => {
         const el = videoRef.current;
         if (!el || userPausedRef.current || el.paused || el.ended) return;

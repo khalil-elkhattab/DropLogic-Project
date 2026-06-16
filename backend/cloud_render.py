@@ -128,6 +128,7 @@ def submit_json2video(
                 "type": "video",
                 "src": video_url,
                 "duration": duration if duration > 0 else -1,
+                "loop": True,
                 "volume": 0,
             },
             {

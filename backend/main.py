@@ -45,10 +45,13 @@ from product_insights import build_active_competitors, build_financials, build_s
 from media_downloader import (
     cache_scraped_video,
     coerce_media_url,
+    download_media_to_file,
     probe_media_url,
     resolve_bake_video_url,
     sanitize_asset_record,
 )
+from caption_engine import generate_burned_captions, get_media_duration_seconds
+from video_baker import FFmpegBakeError, bake_final_mp4, ffmpeg_available
 from url_utils import sanitize_download_url
 from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
 from public_urls import api_public_url, backend_public_origin, static_asset_url
@@ -678,7 +681,7 @@ async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional
         }
 
 
-@video_studio_router.post("/bake", summary="Bake marketing assets via Json2Video / Renderform cloud pipeline")
+@video_studio_router.post("/bake", summary="Bake marketing assets via FFmpeg (primary) or cloud render fallback")
 async def start_video_baking_pipeline(
     request: VideoBakeRequest,
     background_tasks: BackgroundTasks,
@@ -715,7 +718,7 @@ async def start_video_baking_pipeline(
 
     try:
         unique_id = os.urandom(4).hex()
-        print(f"\n[🚀 CLOUD BAKE START] Initializing Json2Video / Renderform pipeline for: {request.product_name}")
+        print(f"\n[🚀 BAKE START] FFmpeg-first pipeline for: {request.product_name}")
 
         source_video_url = resolve_bake_video_url(
             raw_video_input,
@@ -777,24 +780,82 @@ async def start_video_baking_pipeline(
 
         output_video_filename = f"final_video_{unique_id}.mp4"
         output_video_path = os.path.join(OUTPUTS_DIR, output_video_filename)
-        target_duration = float(request.video_duration or 15.0)
+        audio_duration = get_media_duration_seconds(final_audio_path) or float(request.video_duration or 15.0)
 
-        print("[☁️ CLOUD RENDER] Submitting to Json2Video with Renderform failover...")
-        cloud_job = await asyncio.to_thread(
-            render_with_failover,
-            video_url=source_video_url,
-            audio_url=public_audio_url,
-            product_name=request.product_name,
-            duration=target_duration,
+        temp_source_video = os.path.join(OUTPUTS_DIR, f"temp_source_{unique_id}.mp4")
+        temp_cleanup_paths.append(temp_source_video)
+
+        print("[📥 SOURCE DOWNLOAD] Fetching source video for local FFmpeg bake...")
+        downloaded = await download_media_to_file(
+            source_video_url,
+            temp_source_video,
+            backend_public_url=backend_public_origin(),
         )
+        if not downloaded or not os.path.isfile(temp_source_video):
+            raise HTTPException(
+                status_code=502,
+                detail="Could not download source video for baking. Re-run analysis to refresh cached clips.",
+            )
 
-        job_id = cloud_job.combined_id
-        RENDER_JOBS[job_id] = {"status": "rendering", "file_path": output_video_path, "provider": cloud_job.provider}
+        ass_path: str | None = None
+        if request.burn_captions:
+            ass_output = os.path.join(OUTPUTS_DIR, f"caps_{unique_id}.ass")
+            ass_path = generate_burned_captions(
+                request.final_hook,
+                request.final_body,
+                request.final_cta,
+                final_audio_path,
+                ass_output,
+                fallback_duration=audio_duration,
+            )
+            if ass_path:
+                temp_cleanup_paths.append(ass_path)
 
-        print(f"[📥 CLOUD DOWNLOAD] Persisting rendered asset from {cloud_job.provider}...")
-        await download_rendered_video(cloud_job.final_video_url, output_video_path)
+        job_id = f"local_{unique_id}"
+        provider = "ffmpeg"
+        bake_message = "Local FFmpeg bake completed (9:16 vertical, video looped to audio length)."
 
-        RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path, "provider": cloud_job.provider}
+        if ffmpeg_available():
+            print("[🎬 FFMPEG BAKE] Looping source video to audio duration + 1080x1920 crop...")
+            RENDER_JOBS[job_id] = {"status": "rendering", "file_path": output_video_path, "provider": provider}
+            try:
+                await asyncio.to_thread(
+                    bake_final_mp4,
+                    source_video_path=temp_source_video,
+                    audio_path=final_audio_path,
+                    output_path=output_video_path,
+                    anti_ban_filter=request.anti_ban_filter,
+                    subtitle_path=ass_path,
+                )
+            except FFmpegBakeError as ffmpeg_err:
+                logger.warning("[FFmpeg] Local bake failed, falling back to cloud render: %s", ffmpeg_err)
+                provider = None
+            else:
+                RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path, "provider": provider}
+        else:
+            logger.warning("[FFmpeg] Not available on server — using cloud render fallback")
+            provider = None
+
+        if provider is None:
+            print("[☁️ CLOUD RENDER] Submitting to Json2Video with Renderform failover...")
+            cloud_job = await asyncio.to_thread(
+                render_with_failover,
+                video_url=source_video_url,
+                audio_url=public_audio_url,
+                product_name=request.product_name,
+                duration=audio_duration,
+            )
+
+            job_id = cloud_job.combined_id
+            provider = cloud_job.provider
+            bake_message = f"Cloud render completed via {provider} with automatic failover support."
+            RENDER_JOBS[job_id] = {"status": "rendering", "file_path": output_video_path, "provider": provider}
+
+            print(f"[📥 CLOUD DOWNLOAD] Persisting rendered asset from {provider}...")
+            await download_rendered_video(cloud_job.final_video_url, output_video_path)
+
+            RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path, "provider": provider}
+
         final_video_url = static_asset_url(f"outputs/{output_video_filename}")
 
         if request.clerk_user_id:
@@ -828,9 +889,9 @@ async def start_video_baking_pipeline(
 
         return {
             "success": True,
-            "message": f"Cloud render completed via {cloud_job.provider} with automatic failover support.",
+            "message": bake_message,
             "render_id": job_id,
-            "provider": cloud_job.provider,
+            "provider": provider,
             "final_video_url": final_video_url,
             "check_status_url": api_public_url(f"video-studio/render-status/{job_id}"),
             "marketing_assets": {
