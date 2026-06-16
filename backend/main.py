@@ -59,6 +59,16 @@ from video_baker import FFmpegBakeError, bake_final_mp4, ffmpeg_available
 from url_utils import sanitize_download_url
 from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
 from public_urls import api_public_url, backend_public_origin, static_asset_url
+from appsumo_codes import (
+    AppSumoCodeAlreadyUsedError,
+    AppSumoCodeNotFoundError,
+    AppSumoNotConfiguredError,
+    AppSumoServiceError,
+    is_valid_code_format,
+    normalize_appsumo_code,
+    redeem_appsumo_code,
+    upgrade_user_to_lifetime_plan,
+)
 
 if os.getenv("SHOTSTACK_KEY") or os.getenv("SHOTSTACK_API_KEY"):
     logger.warning(
@@ -136,6 +146,12 @@ class ProductRequest(BaseModel):
 
 class AnalysisIncompleteError(Exception):
     """Analysis finished without usable scraped video assets — must not be cached."""
+
+
+class AppSumoActivateRequest(BaseModel):
+    code: str
+    clerk_user_id: str
+    email: Optional[str] = None
 
 class StudioScriptRequest(BaseModel):
     product_name: str
@@ -651,6 +667,63 @@ async def get_analysis_status(task_id: str):
     if not job:
         raise HTTPException(status_code=404, detail=f"Unknown analysis task: {task_id}")
     return _analysis_status_response(job)
+
+
+@app.post(
+    "/api/activate-appsumo-code",
+    summary="Redeem an AppSumo lifetime code and upgrade the user plan",
+)
+async def activate_appsumo_code(request: AppSumoActivateRequest):
+    clean_code = normalize_appsumo_code(request.code)
+    clerk_user_id = (request.clerk_user_id or "").strip()
+    email = (request.email or "").strip() or None
+
+    if not clean_code:
+        raise HTTPException(status_code=400, detail="AppSumo code is required")
+    if not clerk_user_id:
+        raise HTTPException(status_code=400, detail="clerk_user_id is required for redemption")
+    if not is_valid_code_format(clean_code):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid code format. Expected DROPLOGIC-AS-XXXXX (5 uppercase letters or digits).",
+        )
+
+    try:
+        redeemed = await redeem_appsumo_code(clean_code, clerk_user_id)
+        profile = await upgrade_user_to_lifetime_plan(clerk_user_id, email)
+        logger.info(
+            "[APPSUMO] Code %s redeemed by clerk_user_id=%s",
+            clean_code,
+            clerk_user_id,
+        )
+        return {
+            "success": True,
+            "message": "AppSumo code activated. Your account now has lifetime access.",
+            "code": clean_code,
+            "plan_status": (profile.get("plan_status") or "LTD").lower(),
+            "lifetime_plan": True,
+            "redeemed_at": redeemed.get("used_at"),
+            "clerk_user_id": clerk_user_id,
+        }
+    except AppSumoCodeNotFoundError:
+        raise HTTPException(status_code=404, detail="Invalid AppSumo code. Please check and try again.") from None
+    except AppSumoCodeAlreadyUsedError:
+        raise HTTPException(
+            status_code=409,
+            detail="This AppSumo code has already been redeemed.",
+        ) from None
+    except AppSumoNotConfiguredError as exc:
+        logger.error("[APPSUMO] Supabase not configured: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="AppSumo redemption is temporarily unavailable. Please try again later.",
+        ) from exc
+    except AppSumoServiceError as exc:
+        logger.error("[APPSUMO] Redemption failed for %s: %s", clean_code, exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Could not activate AppSumo code. Please try again.",
+        ) from exc
 
 
 # ----------------------------------------------------------------------

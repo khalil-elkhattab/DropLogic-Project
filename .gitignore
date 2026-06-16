@@ -13,3 +13,6 @@ frontend/.env
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Sensitive AppSumo export — never commit generated codes
+backend/appsumo_codes.csv
