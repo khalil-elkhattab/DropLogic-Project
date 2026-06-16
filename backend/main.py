@@ -31,9 +31,13 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 # Import media asset scraper module
 try:
-    from scrapper import fetch_all_platforms_assets
+    from scrapper import ScraperFetchError, fetch_all_platforms_assets
 except ImportError:
-    # Fallback function to safeguard local server testing
+    class ScraperFetchError(Exception):
+        def __init__(self, message: str, status_code: int | None = None):
+            super().__init__(message)
+            self.status_code = status_code
+
     async def fetch_all_platforms_assets(clean_input): return [], ""
 
 # 🟢 STRICT AUDIO ENGINE IMPORT (No more hidden fallbacks / No more warnings)
@@ -127,6 +131,11 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 class ProductRequest(BaseModel):
     keyword: Optional[str] = None
     target_input: Optional[str] = None
+    bypass_cache: bool = False
+
+
+class AnalysisIncompleteError(Exception):
+    """Analysis finished without usable scraped video assets — must not be cached."""
 
 class StudioScriptRequest(BaseModel):
     product_name: str
@@ -315,6 +324,45 @@ def _sanitize_cached_payload(cached: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _has_valid_video_assets(payload: dict[str, Any]) -> bool:
+    """True only when at least one asset has a playable video URL."""
+    for asset in payload.get("raw_assets") or []:
+        cleaned = sanitize_asset_record(asset, backend_public_url=SERVER_PUBLIC_URL)
+        if cleaned and cleaned.get("video_url"):
+            return True
+    return False
+
+
+def _is_cacheable_analysis_result(result: dict[str, Any]) -> bool:
+    """Never cache scraper failures, fallbacks, or empty video lists."""
+    if result.get("error"):
+        return False
+    return _has_valid_video_assets(result)
+
+
+def _get_cacheable_analysis(clean_input: str) -> dict[str, Any] | None:
+    cached = COMPUTED_CACHE.get(clean_input)
+    if not cached:
+        return None
+    if not _is_cacheable_analysis_result(cached):
+        COMPUTED_CACHE.pop(clean_input, None)
+        logger.info("[CACHE EVICT] Removed empty/failed cache entry for keyword=%r", clean_input)
+        return None
+    return _sanitize_cached_payload(cached)
+
+
+def _store_analysis_cache(clean_input: str, result: dict[str, Any]) -> None:
+    if _is_cacheable_analysis_result(result):
+        COMPUTED_CACHE[clean_input] = result
+        logger.info("[CACHE STORE] Saved analysis cache for keyword=%r", clean_input)
+    else:
+        logger.warning("[CACHE SKIP] Not caching empty/failed analysis for keyword=%r", clean_input)
+
+
+def _clear_analysis_cache_entry(clean_input: str) -> bool:
+    return COMPUTED_CACHE.pop(clean_input, None) is not None
+
+
 def _safe_analysis_fallback(keyword: str, *, error: str | None = None) -> dict[str, Any]:
     return {
         "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
@@ -343,12 +391,22 @@ async def _execute_analysis(clean_input: str) -> dict[str, Any]:
 
     try:
         video_assets, live_scraped_text = await fetch_all_platforms_assets(clean_input)
+    except ScraperFetchError as exc:
+        logger.warning(
+            "Platform asset fetch failed for %r (status=%s): %s",
+            clean_input,
+            getattr(exc, "status_code", None),
+            exc,
+        )
+        raise AnalysisIncompleteError(str(exc)) from exc
     except Exception as exc:
         logger.warning(
             "Platform asset fetch failed for %r: %s", clean_input, exc, exc_info=True
         )
-        video_assets = []
-        live_scraped_text = ""
+        raise AnalysisIncompleteError(f"Scraper error: {exc}") from exc
+
+    if not video_assets:
+        raise AnalysisIncompleteError("Scraper returned no video assets")
 
     try:
         real_ai_results = analyze_text_with_real_ai(live_scraped_text, clean_input)
@@ -396,6 +454,9 @@ async def _execute_analysis(clean_input: str) -> dict[str, Any]:
 
         sanitized_assets.append(cleaned)
 
+    if not sanitized_assets:
+        raise AnalysisIncompleteError("No valid video assets after sanitization")
+
     return {
         "analysis_id": f"DL-{random.randint(7000, 9999)}-X",
         "product_name": clean_input,
@@ -426,8 +487,19 @@ async def _run_analysis_background(task_id: str, clean_input: str) -> None:
         job.status = "completed"
         job.result = result
         job.error = None
-        COMPUTED_CACHE[clean_input] = result
+        _store_analysis_cache(clean_input, result)
         logger.info("[✅ ANALYSIS JOB] task_id=%s keyword=%r completed", task_id, clean_input)
+    except AnalysisIncompleteError as exc:
+        logger.warning(
+            "[⚠️ ANALYSIS JOB] task_id=%s keyword=%r incomplete (not cached): %s",
+            task_id,
+            clean_input,
+            exc,
+        )
+        fallback = _safe_analysis_fallback(clean_input, error=str(exc))
+        job.status = "failed"
+        job.result = fallback
+        job.error = str(exc)
     except Exception as exc:
         logger.error(
             "[❌ ANALYSIS JOB] task_id=%s keyword=%r failed: %s",
@@ -440,7 +512,6 @@ async def _run_analysis_background(task_id: str, clean_input: str) -> None:
         job.status = "failed"
         job.result = fallback
         job.error = str(exc)
-        COMPUTED_CACHE[clean_input] = fallback
     finally:
         job.updated_at = time.time()
         if KEYWORD_ACTIVE_TASK.get(clean_input) == task_id:
@@ -471,7 +542,11 @@ def _analysis_status_response(job: AnalysisJob) -> dict[str, Any]:
     "/api/run-analysis",
     summary="Start async product analysis (returns 202 + task_id, or 200 on cache hit)",
 )
-async def analyze_pipeline(request: ProductRequest, background_tasks: BackgroundTasks):
+async def analyze_pipeline(
+    request: ProductRequest,
+    background_tasks: BackgroundTasks,
+    bypass_cache: bool = Query(False, description="Force a fresh scrape; skip global cache"),
+):
     raw_input = request.keyword or request.target_input
     if not raw_input:
         raise HTTPException(
@@ -480,16 +555,21 @@ async def analyze_pipeline(request: ProductRequest, background_tasks: Background
         )
 
     clean_input = raw_input.strip().lower()
+    force_refresh = bypass_cache or request.bypass_cache
     _prune_analysis_jobs()
 
-    if clean_input in COMPUTED_CACHE:
-        print(f"[⚡ GLOBAL CACHE HIT] Serving instant response payload for: {clean_input}")
-        cached = _sanitize_cached_payload(COMPUTED_CACHE[clean_input])
-        return {
-            "status": "completed",
-            "cached": True,
-            **cached,
-        }
+    if force_refresh:
+        if _clear_analysis_cache_entry(clean_input):
+            print(f"[🔄 CACHE BYPASS] Cleared cached payload for: {clean_input}")
+    else:
+        cached = _get_cacheable_analysis(clean_input)
+        if cached:
+            print(f"[⚡ GLOBAL CACHE HIT] Serving instant response payload for: {clean_input}")
+            return {
+                "status": "completed",
+                "cached": True,
+                **cached,
+            }
 
     existing_task_id = KEYWORD_ACTIVE_TASK.get(clean_input)
     if existing_task_id:
@@ -522,6 +602,44 @@ async def analyze_pipeline(request: ProductRequest, background_tasks: Background
             "keyword": clean_input,
         },
     )
+
+
+@app.delete(
+    "/api/analysis-cache",
+    summary="Clear in-memory global analysis cache (one keyword or all)",
+)
+async def clear_analysis_cache(
+    keyword: Optional[str] = Query(
+        None,
+        description="Keyword to clear, e.g. neck massager",
+    ),
+    clear_all: bool = Query(False, description="Clear the entire analysis cache"),
+):
+    if clear_all:
+        cleared_count = len(COMPUTED_CACHE)
+        COMPUTED_CACHE.clear()
+        return {
+            "cleared": cleared_count,
+            "message": f"Cleared {cleared_count} cached analysis entries",
+        }
+
+    if not keyword or not keyword.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Provide keyword= (e.g. neck massager) or clear_all=true",
+        )
+
+    clean_input = keyword.strip().lower()
+    removed = _clear_analysis_cache_entry(clean_input)
+    return {
+        "keyword": clean_input,
+        "cleared": removed,
+        "message": (
+            f"Cache cleared for {clean_input!r}"
+            if removed
+            else f"No cache entry found for {clean_input!r}"
+        ),
+    }
 
 
 @app.get(

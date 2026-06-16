@@ -15,6 +15,15 @@ load_dotenv()
 
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 
+
+class ScraperFetchError(Exception):
+    """Raised when the TikTok scraper times out, errors, or returns no usable videos."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 async def fetch_all_platforms_assets(keyword: str):
     """
     محرك DropLogic المطور والمطابق تماماً لـ TIKWM API.
@@ -26,8 +35,7 @@ async def fetch_all_platforms_assets(keyword: str):
     accumulated_text = ""
 
     if not RAPIDAPI_KEY:
-        logger.error("RAPIDAPI_KEY is missing — returning empty asset list instead of crashing")
-        return [], f"Live dropshipping analysis ready for {clean_keyword}."
+        raise ScraperFetchError("RAPIDAPI_KEY is not configured")
 
     # الهيدرز الرسمية المطابقة للوحة التحكم الخاصة بك في نوكيا هب
     headers = {
@@ -43,13 +51,18 @@ async def fetch_all_platforms_assets(keyword: str):
         
         try:
             response = await client.get(url, headers=headers, params=querystring, timeout=15.0)
-            if response.status_code == 200:
-                res_data = response.json()
+            if response.status_code != 200:
+                raise ScraperFetchError(
+                    f"TikTok API returned HTTP {response.status_code}",
+                    response.status_code,
+                )
+
+            res_data = response.json()
                 
-                # تفكيك مصفوفة الفيديوهات القادمة من السيرفر
-                videos_list = res_data.get("data", {}).get("videos", []) or res_data.get("data", [])
+            # تفكيك مصفوفة الفيديوهات القادمة من السيرفر
+            videos_list = res_data.get("data", {}).get("videos", []) or res_data.get("data", [])
                 
-                for item in videos_list[:4]: # جلب 4 فيديوهات بدقة
+            for item in videos_list[:4]: # جلب 4 فيديوهات بدقة
                     raw_play = item.get("play") or item.get("wmplay") or ""
                     video_url = coerce_media_url(
                         raw_play,
@@ -98,10 +111,15 @@ async def fetch_all_platforms_assets(keyword: str):
                             "avatar": merchant_avatar,
                         },
                     })
+        except ScraperFetchError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise ScraperFetchError("TikTok API request timed out (504 Gateway Time-out)", 504) from exc
         except Exception as e:
             logger.warning("TIKWM data fetch failed for keyword=%r: %s", clean_keyword, e, exc_info=True)
+            raise ScraperFetchError(f"TikTok API fetch failed: {e}") from e
 
     if len(final_assets) == 0:
-        accumulated_text = f"Live dropshipping analysis ready for {keyword}."
+        raise ScraperFetchError("TikTok API returned no valid videos", 200)
         
     return final_assets, accumulated_text
