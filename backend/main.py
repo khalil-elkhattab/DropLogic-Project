@@ -209,35 +209,46 @@ def clean_and_parse_json(raw_text: str) -> dict:
         return {}
 
 
+def _trim_words(text: str, max_words: int) -> str:
+    words = str(text or "").split()
+    if len(words) <= max_words:
+        return str(text or "").strip()
+    trimmed = " ".join(words[:max_words]).rstrip(".,!?")
+    return f"{trimmed}."
+
+
 def normalize_script_layers(script_layers: dict, product_name: str) -> dict:
-    """Normalize LLM output into hook_options (3), body, and cta."""
+    """Normalize LLM output into hook_options (3), body, and cta — tuned for ~12–15s voiceover."""
     product_name = product_name or "this product"
     default_hooks = [
-        f"Stop scrolling — this {product_name} changes everything.",
+        f"Stop scrolling — this {product_name} is a game changer.",
         f"Nobody talks about this {product_name} hack.",
         f"I wish I found this {product_name} sooner.",
     ]
 
     hook_options = script_layers.get("hook_options")
     if isinstance(hook_options, list) and hook_options:
-        hooks = [str(hook).strip() for hook in hook_options if str(hook).strip()]
+        hooks = [_trim_words(str(hook).strip(), 10) for hook in hook_options if str(hook).strip()]
         while len(hooks) < 3:
             hooks.append(hooks[-1] if hooks else default_hooks[len(hooks)])
         hooks = hooks[:3]
     else:
-        single_hook = str(script_layers.get("hook", default_hooks[0])).strip() or default_hooks[0]
+        single_hook = _trim_words(str(script_layers.get("hook", default_hooks[0])).strip() or default_hooks[0], 10)
         hooks = [
             single_hook,
-            f"POV: you finally found the perfect {product_name}.",
-            f"This is why everyone is buying {product_name} right now.",
+            _trim_words(f"POV: you found the perfect {product_name}.", 10),
+            _trim_words(f"Everyone is buying this {product_name} right now.", 10),
         ]
 
-    body = str(script_layers.get("body", "")).strip() or (
-        f"This viral {product_name} solves your biggest daily pain points instantly. "
-        "Premium quality without the premium markup."
+    body = _trim_words(
+        str(script_layers.get("body", "")).strip()
+        or f"This {product_name} fixes your daily pain fast. Premium results, no premium price.",
+        18,
     )
-    cta = str(script_layers.get("cta", "")).strip() or (
-        f"Get 50% off {product_name} today only — tap the link in bio before we sell out."
+    cta = _trim_words(
+        str(script_layers.get("cta", "")).strip()
+        or f"Get 50% off today — link in bio before we sell out.",
+        10,
     )
 
     return {
@@ -538,11 +549,15 @@ async def generate_ai_script_layers(request: StudioScriptRequest):
     You are a professional TikTok and Meta e-commerce copywriter for Western dropshippers.
     Create a high-converting English ad script for the product: "{request.product_name}".
 
+    CRITICAL TIMING: The entire script (one hook + body + cta) must be readable aloud in 12 to 15 seconds
+    maximum at a natural TikTok pace (~2.5 words/second). Total word count across hook + body + cta must stay
+    under 38 words. Match typical scraped TikTok clips (~10–15 seconds).
+
     You MUST output ONLY a valid JSON object with exactly these keys:
-    - "hook_options": an array of exactly 3 distinct strings. Each hook must be punchy, spoken in first person,
-      under 14 words, and engineered to grab attention in the FIRST 3 SECONDS on TikTok. No numbering or bullets inside strings.
-    - "body": a string with 2-3 short sentences covering the main product benefits, transformation, and social proof.
-    - "cta": a string with a strong conversion closer including urgency (example pattern: "Get 50% off today only at the link in bio").
+    - "hook_options": an array of exactly 3 distinct strings. Each hook: max 10 words, first-person, grabs
+      attention in the FIRST 3 SECONDS. No numbering or bullets inside strings.
+    - "body": ONE short sentence only (max 18 words) — one key benefit or transformation. No filler.
+    - "cta": max 10 words — urgent conversion closer (e.g. "Get 50% off today — link in bio").
 
     Do not include any introduction, markdown formatting, backticks, or text outside the JSON block.
     """

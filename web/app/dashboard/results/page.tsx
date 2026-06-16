@@ -451,6 +451,7 @@ function DashboardContent() {
                       variant="vertical"
                       autoPlay
                       muted
+                      loop
                       controls
                       preload="auto"
                       label={`Preview: ${selectedVideo.title}`}
@@ -505,6 +506,7 @@ function DashboardContent() {
                               <ProxiedVideoPlayer
                                 src={video.video_url}
                                 fillFrame
+                                loop
                                 controls={false}
                                 onMouseEnterPlay
                                 preload="auto"

@@ -362,6 +362,7 @@ function SuccessPublishContent() {
                     src={previewVideoUrl}
                     fillFrame
                     variant="fill"
+                    loop
                     controls={!showTikTokOverlay}
                     muted={false}
                     preload="auto"

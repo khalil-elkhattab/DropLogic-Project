@@ -11,13 +11,13 @@ export function createDefaultScript(productName: string): AdScript {
   const name = productName || 'this product';
   return {
     hookOptions: [
-      `Stop scrolling — this ${name} changes everything.`,
+      `Stop scrolling — this ${name} is a game changer.`,
       `Nobody talks about this ${name} hack.`,
       `I wish I found this ${name} sooner.`,
     ],
     selectedHookIndex: 0,
-    body: `This trending ${name} solves your biggest daily pain points instantly. Built for real results without the premium markup.`,
-    cta: `Get 50% off today only — tap the link in bio before we sell out.`,
+    body: `This ${name} fixes your daily pain fast. Premium results, no premium price.`,
+    cta: `Get 50% off today — link in bio before we sell out.`,
   };
 }
 

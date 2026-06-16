@@ -26,7 +26,7 @@ export default function ProxiedVideoPlayer({
   className,
   autoPlay = false,
   muted = true,
-  loop = false,
+  loop = true,
   controls = true,
   playsInline = true,
   preload = 'auto',
