@@ -1,6 +1,8 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
 const isPublicRoute = createRouteMatcher([
+  '/activate-appsumo(.*)',
+  '/api/activate-appsumo-code',
   '/api/webhooks/lemonsqueezy',
   '/api/run-analysis',
   '/api/analysis-status(.*)',
@@ -15,7 +17,8 @@ export default clerkMiddleware(async (_auth, req) => {
 
 export const config = {
   matcher: [
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Exclude /activate-appsumo entirely — page handles sign-in via Clerk components client-side
+    '/((?!_next|activate-appsumo|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     '/(api|trpc)(.*)',
   ],
 };
