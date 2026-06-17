@@ -1,10 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@clerk/clerk-react';
 import { getLtdCheckoutUrl, getProCheckoutUrl } from '@/lib/lemonsqueezy/checkout';
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
+import AppSumoLaunchModal, { type CheckoutPlan } from '@/components/pricing/AppSumoLaunchModal';
 import { FREE_TIER_VIDEO_LIMIT } from '@/lib/quota';
 
 const freePlan = {
@@ -57,6 +58,8 @@ const ltdPlan = {
 export default function CustomPricingPage() {
   const router = useRouter();
   const { user } = useUser();
+  const [launchModalOpen, setLaunchModalOpen] = useState(false);
+  const [pendingCheckoutPlan, setPendingCheckoutPlan] = useState<CheckoutPlan | null>(null);
 
   const redirectToCheckout = (url: string | null, label: string) => {
     if (!url) {
@@ -64,6 +67,16 @@ export default function CustomPricingPage() {
       return;
     }
     window.location.href = url;
+  };
+
+  const openLaunchModal = (plan: CheckoutPlan) => {
+    setPendingCheckoutPlan(plan);
+    setLaunchModalOpen(true);
+  };
+
+  const closeLaunchModal = () => {
+    setLaunchModalOpen(false);
+    setPendingCheckoutPlan(null);
   };
 
   const handleProCheckout = () => {
@@ -86,6 +99,15 @@ export default function CustomPricingPage() {
     );
   };
 
+  const handleContinueRegularCheckout = (plan: CheckoutPlan) => {
+    closeLaunchModal();
+    if (plan === 'pro') {
+      handleProCheckout();
+      return;
+    }
+    handleLtdCheckout();
+  };
+
   const proConfigured = Boolean(process.env.NEXT_PUBLIC_LEMONSQUEEZY_PRO_CHECKOUT_URL);
   const ltdConfigured = Boolean(process.env.NEXT_PUBLIC_LEMONSQUEEZY_LTD_CHECKOUT_URL);
 
@@ -105,6 +127,22 @@ export default function CustomPricingPage() {
       </nav>
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-12 relative z-10 flex flex-col items-center">
+        <button
+          type="button"
+          onClick={() => router.push('/activate-appsumo')}
+          className="mb-8 w-full max-w-2xl rounded-2xl border border-violet-500/35 bg-gradient-to-r from-violet-600/20 via-violet-500/10 to-transparent px-6 py-4 text-left transition hover:border-violet-400/50 hover:shadow-[0_0_28px_rgba(139,92,246,0.2)]"
+        >
+          <p className="text-[9px] font-mono font-bold uppercase tracking-widest text-violet-300 mb-1">
+            // AppSumo Customers
+          </p>
+          <p className="text-sm font-black uppercase tracking-wide text-zinc-50">
+            Got an AppSumo Code? Click here to activate →
+          </p>
+          <p className="text-[11px] text-zinc-400 mt-1">
+            Redeem your lifetime license in seconds and unlock unlimited rendering.
+          </p>
+        </button>
+
         <div className="text-center max-w-xl mx-auto mb-12">
           <span className="text-[9px] font-mono font-bold text-violet-400 uppercase tracking-widest block mb-2">
             // Choose Your Plan
@@ -198,7 +236,7 @@ export default function CustomPricingPage() {
 
             <button
               type="button"
-              onClick={handleProCheckout}
+              onClick={() => openLaunchModal('pro')}
               disabled={!proConfigured}
               className="w-full h-11 rounded-xl dl-btn-primary text-[10px] uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -245,7 +283,7 @@ export default function CustomPricingPage() {
 
             <button
               type="button"
-              onClick={handleLtdCheckout}
+              onClick={() => openLaunchModal('ltd')}
               disabled={!ltdConfigured}
               className="w-full h-11 rounded-xl dl-btn-primary text-[10px] uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -261,6 +299,13 @@ export default function CustomPricingPage() {
           </p>
         </div>
       </main>
+
+      <AppSumoLaunchModal
+        open={launchModalOpen}
+        plan={pendingCheckoutPlan}
+        onClose={closeLaunchModal}
+        onContinueCheckout={handleContinueRegularCheckout}
+      />
     </div>
   );
 }

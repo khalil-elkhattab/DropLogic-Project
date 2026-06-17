@@ -18,6 +18,7 @@ import {
   isFreeTierLimitReached,
   type VideoQuota,
 } from '@/lib/quota';
+import { PLAN_UPDATED_EVENT } from '@/lib/plan-events';
 
 function parseScriptEngine(engine: Record<string, unknown>, productName: string): AdScript {
   const defaults = createDefaultScript(productName);
@@ -107,6 +108,15 @@ function AIStudioContent() {
       loadVideoQuota();
     }
   }, [isLoaded, loadVideoQuota]);
+
+  useEffect(() => {
+    const handlePlanUpdated = () => {
+      void loadVideoQuota();
+    };
+
+    window.addEventListener(PLAN_UPDATED_EVENT, handlePlanUpdated);
+    return () => window.removeEventListener(PLAN_UPDATED_EVENT, handlePlanUpdated);
+  }, [loadVideoQuota]);
 
   useEffect(() => {
     const source = resolveBakeVideoUrl(
