@@ -1,4 +1,54 @@
 {
+  "build": {
+    "env": {
+      "VERCEL_FORCE_NO_BUILD_CACHE": "1",
+      "DEPLOY_CACHE_BUST": "activate-appsumo-edge-bust-v5"
+    }
+  },
+  "headers": [
+    {
+      "source": "/activate-appsumo",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "X-Deploy-Cache-Bust",
+          "value": "activate-appsumo-edge-bust-v5"
+        }
+      ]
+    },
+    {
+      "source": "/activate-appsumo/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, max-age=0"
+        },
+        {
+          "key": "CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Vercel-CDN-Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "X-Deploy-Cache-Bust",
+          "value": "activate-appsumo-edge-bust-v5"
+        }
+      ]
+    }
+  ],
   "functions": {
     "app/api/run-analysis/route.ts": {
       "maxDuration": 15

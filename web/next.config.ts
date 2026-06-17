@@ -15,12 +15,46 @@ const BACKEND_ORIGIN = (
   "http://164.90.235.14:8000"
 ).replace(/\/$/, "");
 
+/** Bump to force fresh Vercel edge + build cache when debugging routing. */
+const DEPLOY_CACHE_BUST =
+  process.env.DEPLOY_CACHE_BUST ||
+  process.env.VERCEL_DEPLOYMENT_ID ||
+  "activate-appsumo-cache-bust-v5";
+
 const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
   eslint: {
     ignoreDuringBuilds: true,
+  },
+  env: {
+    NEXT_PUBLIC_DEPLOY_CACHE_BUST: DEPLOY_CACHE_BUST,
+  },
+  generateBuildId: async () => DEPLOY_CACHE_BUST,
+  async headers() {
+    return [
+      {
+        source: "/activate-appsumo",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, max-age=0" },
+          { key: "CDN-Cache-Control", value: "no-store" },
+          { key: "Vercel-CDN-Cache-Control", value: "no-store" },
+          { key: "X-Deploy-Cache-Bust", value: DEPLOY_CACHE_BUST },
+          { key: "X-Middleware-Override", value: "none" },
+        ],
+      },
+      {
+        source: "/activate-appsumo/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, max-age=0" },
+          { key: "CDN-Cache-Control", value: "no-store" },
+          { key: "Vercel-CDN-Cache-Control", value: "no-store" },
+          { key: "X-Deploy-Cache-Bust", value: DEPLOY_CACHE_BUST },
+          { key: "X-Middleware-Override", value: "none" },
+        ],
+      },
+    ];
   },
   async rewrites() {
     const backend = BACKEND_ORIGIN;
