@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { SignInButton, useUser } from '@clerk/clerk-react';
+import { SignInButton, useUser } from '@clerk/nextjs';
 import {
   activateAppSumoCode,
   isValidAppSumoCodeFormat,

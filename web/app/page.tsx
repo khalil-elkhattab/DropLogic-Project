@@ -1,14 +1,69 @@
 "use client";
 import React from 'react';
 import Link from 'next/link';
-import { 
-  SignedIn, 
-  SignedOut, 
-  SignInButton, 
-  UserButton 
-} from "@clerk/clerk-react";
+import { SignInButton, UserButton, useAuth } from '@clerk/nextjs';
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import FaqAccordion from '@/components/FaqAccordion';
+
+function AuthNavActions() {
+  const { isLoaded, isSignedIn } = useAuth();
+
+  if (!isLoaded) {
+    return <div className="h-10 w-24 rounded-full bg-white/5 animate-pulse" aria-hidden />;
+  }
+
+  if (!isSignedIn) {
+    return (
+      <>
+        <SignInButton mode="modal">
+          <button className="text-[13px] font-medium text-zinc-400 hover:text-white px-2">
+            Log in
+          </button>
+        </SignInButton>
+        <SignInButton mode="modal">
+          <button className="text-[11px] md:text-[13px] dl-btn-primary px-3 md:px-4 py-1.5 rounded-full font-medium whitespace-nowrap">
+            Get Started
+          </button>
+        </SignInButton>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Link href="/dashboard" className="text-[13px] font-bold text-violet-400 mr-2 hover:text-violet-300">
+        Dashboard
+      </Link>
+      <UserButton />
+    </>
+  );
+}
+
+function HeroAuthCta() {
+  const { isLoaded, isSignedIn } = useAuth();
+
+  if (!isLoaded) {
+    return <div className="h-12 w-48 rounded-full bg-white/5 animate-pulse" aria-hidden />;
+  }
+
+  if (!isSignedIn) {
+    return (
+      <SignInButton mode="modal">
+        <button className="dl-btn-primary px-6 md:px-10 py-4 rounded-full text-base md:text-lg hover:scale-[1.02] w-full sm:w-auto">
+          Get Started Free
+        </button>
+      </SignInButton>
+    );
+  }
+
+  return (
+    <Link href="/dashboard" className="w-full sm:w-auto">
+      <button className="dl-btn-primary px-6 md:px-10 py-4 rounded-full text-base md:text-lg hover:scale-[1.02] w-full">
+        Go to Dashboard
+      </button>
+    </Link>
+  );
+}
 
 export default function Home() {
   const testimonials = [
@@ -51,20 +106,7 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
-            <SignedOut>
-              <SignInButton mode="modal">
-                <button className="text-[13px] font-medium text-zinc-400 hover:text-white px-2">Log in</button>
-              </SignInButton>
-              <SignInButton mode="modal">
-                <button className="text-[11px] md:text-[13px] dl-btn-primary px-3 md:px-4 py-1.5 rounded-full font-medium whitespace-nowrap">
-                  Get Started
-                </button>
-              </SignInButton>
-            </SignedOut>
-            <SignedIn>
-              <Link href="/dashboard" className="text-[13px] font-bold text-violet-400 mr-2 hover:text-violet-300">Dashboard</Link>
-              <UserButton afterSignOutUrl="/" />
-            </SignedIn>
+            <AuthNavActions />
           </div>
         </div>
       </nav>
@@ -87,22 +129,7 @@ export default function Home() {
                 DropLogic AI automates the complex parts of dropshipping. Master the market with precision algorithms.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 md:justify-end w-full sm:w-auto">
-                <SignedOut>
-                  <SignInButton mode="modal">
-                    <button className="dl-btn-primary px-6 md:px-10 py-4 rounded-full text-base md:text-lg hover:scale-[1.02] w-full sm:w-auto">
-                      Get Started Free
-                    </button>
-                  </SignInButton>
-                </SignedOut>
-                
-                <SignedIn>
-                  <Link href="/dashboard" className="w-full sm:w-auto">
-                    <button className="dl-btn-primary px-6 md:px-10 py-4 rounded-full text-base md:text-lg hover:scale-[1.02] w-full">
-                      Go to Dashboard
-                    </button>
-                  </Link>
-                </SignedIn>
-
+                <HeroAuthCta />
                 <a href="#demo" className="dl-btn-secondary px-6 md:px-10 py-4 rounded-full text-base md:text-lg flex items-center justify-center gap-2 w-full sm:w-auto">
                   <span>Watch Demo</span>
                   <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse"></div>

@@ -1,9 +1,10 @@
 import './globals.css'
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
+import { ClerkProvider } from '@clerk/nextjs'
 
-import ClerkProviderWrapper from './ClerkProviderWrapper'
 import CookieConsent from '@/components/CookieConsent'
+import { clerkAppearance } from '@/lib/clerk-appearance'
 import { siteConfig } from '@/lib/site'
 
 /** Clerk auth components cannot run during static prerender without env keys. */
@@ -83,19 +84,23 @@ export const metadata: Metadata = {
   // Swap ogImagePath to '/og-image.png' once a static asset is added to /public
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${inter.className} dl-page antialiased`}>
-        <ClerkProviderWrapper>
+    <ClerkProvider
+      appearance={clerkAppearance}
+      signInFallbackRedirectUrl="/dashboard"
+      signUpFallbackRedirectUrl="/dashboard"
+    >
+      <html lang="en" className="dark">
+        <body className={`${inter.className} dl-page antialiased`}>
           {children}
           <CookieConsent />
-        </ClerkProviderWrapper>
-      </body>
-    </html>
+        </body>
+      </html>
+    </ClerkProvider>
   )
 }
