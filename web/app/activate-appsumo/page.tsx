@@ -1,18 +1,43 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import DropLogicLogo from '@/components/brand/DropLogicLogo';
-import AppSumoActivationForm from '@/components/appsumo/AppSumoActivationForm';
+import { useEffect, useState } from 'react';
+
+const AppSumoActivationForm = dynamic(
+  () => import('@/components/appsumo/AppSumoActivationForm'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="dl-glass p-8 text-center">
+        <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 animate-pulse">
+          Loading activation form…
+        </p>
+      </div>
+    ),
+  },
+);
 
 export default function ActivateAppSumoPage() {
   const router = useRouter();
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   return (
     <div className="dl-page dl-page-elevated font-sans antialiased relative overflow-hidden flex flex-col min-h-screen">
       <div className="dl-grid-bg" />
 
       <nav className="dl-nav h-16 flex items-center justify-between px-6 md:px-10 relative shrink-0">
-        <DropLogicLogo href="/dashboard" size="md" className="italic text-zinc-100" />
+        <Link
+          href="/dashboard"
+          className="text-lg font-bold tracking-tighter uppercase text-zinc-100 hover:opacity-90 transition-opacity"
+        >
+          DropLogic<span className="text-violet-400">.</span>
+        </Link>
         <button
           type="button"
           onClick={() => router.push('/dashboard/pricing')}
@@ -34,7 +59,7 @@ export default function ActivateAppSumoPage() {
         </div>
 
         <div className="w-full max-w-md">
-          <AppSumoActivationForm />
+          {isClient ? <AppSumoActivationForm /> : null}
         </div>
       </main>
     </div>
