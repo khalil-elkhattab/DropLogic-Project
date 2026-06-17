@@ -3,6 +3,8 @@ export type AppSumoActivateResponse = {
   message: string;
   code: string;
   plan_status: string;
+  user_tier: string;
+  appsumo_codes_count: number;
   lifetime_plan: boolean;
   redeemed_at?: string | null;
   clerk_user_id: string;

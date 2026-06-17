@@ -1,4 +1,4 @@
-"""AppSumo code generation, storage, and lifetime-plan redemption via Supabase."""
+"""AppSumo code generation, storage, and tiered-plan redemption via Supabase."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import httpx
 
-from usage_quota import get_or_create_profile
+from usage_quota import get_or_create_profile, tier_from_appsumo_codes_count
 
 logger = logging.getLogger("droplogic.appsumo")
 
@@ -172,12 +172,37 @@ async def redeem_appsumo_code(code: str, clerk_user_id: str) -> dict[str, Any]:
     raise AppSumoServiceError(f"Code {code!r} could not be redeemed")
 
 
-async def upgrade_user_to_lifetime_plan(clerk_user_id: str, email: str | None) -> dict[str, Any]:
-    """Set profiles.plan_status to LTD for the authenticated user."""
+def _tier_activation_message(user_tier: str, appsumo_codes_count: int) -> str:
+    if user_tier == "appsumo_tier3":
+        return (
+            f"AppSumo code activated ({appsumo_codes_count} codes stacked). "
+            "You now have unlimited monthly video renders."
+        )
+    if user_tier == "appsumo_tier2":
+        return (
+            f"AppSumo code activated ({appsumo_codes_count} codes stacked). "
+            "Your monthly limit is now 300 videos."
+        )
+    return (
+        f"AppSumo code activated ({appsumo_codes_count} code stacked). "
+        "Your monthly limit is now 100 videos."
+    )
+
+
+async def upgrade_user_appsumo_tier(clerk_user_id: str, email: str | None) -> dict[str, Any]:
+    """
+    Increment appsumo_codes_count and set user_tier:
+      1 code  -> appsumo_tier1 (100/mo)
+      2 codes -> appsumo_tier2 (300/mo)
+      3+ codes -> appsumo_tier3 (unlimited)
+    """
     if not supabase_configured():
         raise AppSumoNotConfiguredError("Supabase is not configured")
 
-    await get_or_create_profile(clerk_user_id, email)
+    profile = await get_or_create_profile(clerk_user_id, email)
+    current_count = int(profile.get("appsumo_codes_count") or 0)
+    new_count = current_count + 1
+    new_tier = tier_from_appsumo_codes_count(new_count)
 
     updated_at = datetime.now(timezone.utc).isoformat()
     url = (
@@ -185,6 +210,8 @@ async def upgrade_user_to_lifetime_plan(clerk_user_id: str, email: str | None) -
         f"?clerk_user_id=eq.{quote(clerk_user_id, safe='')}"
     )
     payload: dict[str, Any] = {
+        "appsumo_codes_count": new_count,
+        "user_tier": new_tier,
         "plan_status": LIFETIME_PLAN_STATUS,
         "updated_at": updated_at,
     }
@@ -204,7 +231,19 @@ async def upgrade_user_to_lifetime_plan(clerk_user_id: str, email: str | None) -
         rows = response.json() if response.content else []
 
     if rows:
-        return rows[0]
+        profile = rows[0]
+    else:
+        profile = await get_or_create_profile(clerk_user_id, email)
+        profile = {
+            **profile,
+            "appsumo_codes_count": new_count,
+            "user_tier": new_tier,
+            "plan_status": LIFETIME_PLAN_STATUS,
+        }
 
-    profile = await get_or_create_profile(clerk_user_id, email)
-    return {**profile, "plan_status": LIFETIME_PLAN_STATUS}
+    profile["activation_message"] = _tier_activation_message(new_tier, new_count)
+    return profile
+
+
+# Backward-compatible alias for imports that still reference the old name.
+upgrade_user_to_lifetime_plan = upgrade_user_appsumo_tier

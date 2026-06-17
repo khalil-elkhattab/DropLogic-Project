@@ -3,6 +3,20 @@ import type { LemonSqueezyWebhookEvent } from './types';
 
 type ProfilePlan = 'free' | 'pro' | 'LTD' | 'credits';
 
+type UserTier =
+  | 'free'
+  | 'premium'
+  | 'appsumo_tier1'
+  | 'appsumo_tier2'
+  | 'appsumo_tier3';
+
+function resolveUserTierForPlan(planStatus: ProfilePlan): UserTier {
+  if (planStatus === 'pro' || planStatus === 'credits' || planStatus === 'LTD') {
+    return 'premium';
+  }
+  return 'free';
+}
+
 type SyncProfileInput = {
   email: string;
   clerkUserId?: string | null;
@@ -59,7 +73,7 @@ export async function findProfile(
   if (clerkUserId) {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, clerk_user_id, plan_status')
+      .select('id, email, clerk_user_id, plan_status, user_tier, appsumo_codes_count')
       .eq('clerk_user_id', clerkUserId)
       .maybeSingle();
 
@@ -69,7 +83,7 @@ export async function findProfile(
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, clerk_user_id, plan_status')
+    .select('id, email, clerk_user_id, plan_status, user_tier, appsumo_codes_count')
     .eq('email', email)
     .maybeSingle();
 
@@ -83,13 +97,26 @@ export async function syncProfilePlan(
 ): Promise<void> {
   const existing = await findProfile(supabase, input.email, input.clerkUserId);
 
-  if (input.planStatus === 'free' && existing?.plan_status === 'LTD') {
-    return;
+  if (input.planStatus === 'free') {
+    const existingTier = (existing?.user_tier || '').toLowerCase();
+    if (
+      existing?.plan_status === 'LTD' ||
+      existingTier.startsWith('appsumo_')
+    ) {
+      return;
+    }
   }
 
-  const row: Record<string, string | null> = {
+  const existingTier = (existing?.user_tier || '').toLowerCase();
+  const nextTier =
+    existingTier.startsWith('appsumo_') && input.planStatus !== 'free'
+      ? existingTier
+      : resolveUserTierForPlan(input.planStatus);
+
+  const row: Record<string, string | number | null> = {
     email: input.email,
     plan_status: input.planStatus,
+    user_tier: nextTier,
     updated_at: new Date().toISOString(),
   };
 

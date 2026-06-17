@@ -38,7 +38,11 @@ export default function AppSumoActivationForm({ onSuccess, compact = false }: Ap
     try {
       const result = await activateAppSumoCode(normalized);
       setSuccess(true);
-      notifyPlanUpdated({ plan_status: result.plan_status || 'ltd' });
+      notifyPlanUpdated({
+        plan_status: result.plan_status || 'ltd',
+        user_tier: result.user_tier,
+        appsumo_codes_count: result.appsumo_codes_count,
+      });
       onSuccess?.();
     } catch (activationError) {
       setError(mapAppSumoErrorMessage(activationError));
@@ -81,11 +85,11 @@ export default function AppSumoActivationForm({ onSuccess, compact = false }: Ap
             </span>
           </div>
           <h2 className="text-xl font-black uppercase tracking-tight text-zinc-50">
-            Welcome to Lifetime Access! 🎉
+            AppSumo Code Activated
           </h2>
           <p className="text-xs text-zinc-400 max-w-sm mx-auto leading-relaxed">
-            Your AppSumo code is active. Unlimited rendering and lifetime plan benefits are now unlocked on
-            your account.
+            Your tier has been upgraded. Head to Studio to start rendering with your new monthly
+            credits.
           </p>
           <button
             type="button"

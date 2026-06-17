@@ -15,13 +15,21 @@ import httpx
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
 
-FREE_LIFETIME_LIMIT = int(os.getenv("FREE_TIER_VIDEO_LIMIT", "1"))
-PRO_MONTHLY_BASE_LIMIT = int(os.getenv("PRO_MONTHLY_BASE_LIMIT", "30"))
-PRO_MONTHLY_REVIEWED_LIMIT = int(os.getenv("PRO_MONTHLY_REVIEWED_LIMIT", "50"))
-PRO_MONTHLY_LIMIT = int(os.getenv("PRO_MONTHLY_VIDEO_LIMIT", str(PRO_MONTHLY_BASE_LIMIT)))
-LTD_MONTHLY_LIMIT = int(os.getenv("LTD_MONTHLY_VIDEO_LIMIT", str(PRO_MONTHLY_BASE_LIMIT)))
+FREE_LIFETIME_LIMIT = int(os.getenv("FREE_TIER_VIDEO_LIMIT", "5"))
+PREMIUM_MONTHLY_LIMIT = int(os.getenv("PREMIUM_MONTHLY_VIDEO_LIMIT", "200"))
+APPSUMO_TIER1_MONTHLY_LIMIT = int(os.getenv("APPSUMO_TIER1_MONTHLY_VIDEO_LIMIT", "100"))
+APPSUMO_TIER2_MONTHLY_LIMIT = int(os.getenv("APPSUMO_TIER2_MONTHLY_VIDEO_LIMIT", "300"))
 
-PRO_PLAN_STATUSES = {"pro", "ltd", "credits"}
+# Sentinel: tier3 bypasses all limit checks.
+UNLIMITED_LIMIT = -1
+
+USER_TIERS = frozenset({
+    "free",
+    "premium",
+    "appsumo_tier1",
+    "appsumo_tier2",
+    "appsumo_tier3",
+})
 
 # Dev fallback when Supabase is not configured
 _LOCAL_USAGE: dict[str, list[float]] = {}
@@ -34,11 +42,13 @@ logger = logging.getLogger("droplogic.quota")
 class QuotaStatus:
     allowed: bool
     plan_status: str
+    user_tier: str
     limit: int
     used: int
-    period: str  # "lifetime" | "monthly"
+    period: str  # "lifetime" | "monthly" | "unlimited"
     message: str
     has_reviewed: bool = False
+    appsumo_codes_count: int = 0
 
 
 class QuotaExceededError(Exception):
@@ -71,27 +81,46 @@ def _normalize_plan(plan_status: str | None) -> str:
     return (plan_status or "free").strip().lower()
 
 
-def _limits_for_profile(profile: dict[str, Any]) -> tuple[int, str]:
+def tier_from_appsumo_codes_count(count: int) -> str:
+    if count >= 3:
+        return "appsumo_tier3"
+    if count == 2:
+        return "appsumo_tier2"
+    if count >= 1:
+        return "appsumo_tier1"
+    return "free"
+
+
+def resolve_user_tier(profile: dict[str, Any]) -> str:
+    tier = (profile.get("user_tier") or "").strip().lower()
+    if tier in USER_TIERS:
+        return tier
+
     plan = _normalize_plan(profile.get("plan_status"))
-    if plan == "free":
-        return FREE_LIFETIME_LIMIT, "lifetime"
-
-    explicit_limit = profile.get("monthly_video_limit")
-    if isinstance(explicit_limit, int) and explicit_limit > 0:
-        return explicit_limit, "monthly"
-
-    if profile.get("has_reviewed"):
-        return PRO_MONTHLY_REVIEWED_LIMIT, "monthly"
-
+    appsumo_count = int(profile.get("appsumo_codes_count") or 0)
+    if appsumo_count > 0:
+        return tier_from_appsumo_codes_count(appsumo_count)
+    if plan in {"pro", "credits"}:
+        return "premium"
     if plan == "ltd":
-        return LTD_MONTHLY_LIMIT, "monthly"
-    if plan in PRO_PLAN_STATUSES:
-        return PRO_MONTHLY_BASE_LIMIT, "monthly"
+        return "appsumo_tier1"
+    return "free"
+
+
+def _limits_for_profile(profile: dict[str, Any]) -> tuple[int, str]:
+    tier = resolve_user_tier(profile)
+
+    if tier == "appsumo_tier3":
+        return UNLIMITED_LIMIT, "unlimited"
+    if tier == "free":
+        return FREE_LIFETIME_LIMIT, "lifetime"
+    if tier == "appsumo_tier1":
+        return APPSUMO_TIER1_MONTHLY_LIMIT, "monthly"
+    if tier == "appsumo_tier2":
+        return APPSUMO_TIER2_MONTHLY_LIMIT, "monthly"
+    if tier == "premium":
+        return PREMIUM_MONTHLY_LIMIT, "monthly"
     return FREE_LIFETIME_LIMIT, "lifetime"
-
-
-def _limits_for_plan(plan_status: str) -> tuple[int, str]:
-    return _limits_for_profile({"plan_status": plan_status, "has_reviewed": False})
 
 
 async def _supabase_get_profile(clerk_user_id: str) -> dict[str, Any] | None:
@@ -112,6 +141,8 @@ async def _supabase_upsert_profile(clerk_user_id: str, email: str | None) -> dic
         "clerk_user_id": clerk_user_id,
         "email": email or f"{clerk_user_id}@users.droplogic.local",
         "plan_status": "free",
+        "user_tier": "free",
+        "appsumo_codes_count": 0,
     }
     url = f"{SUPABASE_URL}/rest/v1/profiles?on_conflict=clerk_user_id"
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -195,6 +226,8 @@ async def get_or_create_profile(clerk_user_id: str, email: str | None) -> dict[s
             "clerk_user_id": clerk_user_id,
             "email": email,
             "plan_status": "free",
+            "user_tier": "free",
+            "appsumo_codes_count": 0,
             **local_review,
         }
 
@@ -209,14 +242,81 @@ async def get_or_create_profile(clerk_user_id: str, email: str | None) -> dict[s
             clerk_user_id,
             exc,
         )
-        return {"clerk_user_id": clerk_user_id, "email": email, "plan_status": "free"}
+        return {
+            "clerk_user_id": clerk_user_id,
+            "email": email,
+            "plan_status": "free",
+            "user_tier": "free",
+            "appsumo_codes_count": 0,
+        }
+
+
+def _quota_message(
+    *,
+    allowed: bool,
+    user_tier: str,
+    limit: int,
+    used: int,
+    remaining: int,
+) -> str:
+    if user_tier == "appsumo_tier3":
+        return "Unlimited video renders on your AppSumo Tier 3 plan."
+
+    if not allowed:
+        if user_tier == "free":
+            return (
+                f"Free tier limit reached ({FREE_LIFETIME_LIMIT} videos total). "
+                "Upgrade to Premium or stack AppSumo codes for more renders."
+            )
+        return (
+            f"Monthly video limit reached ({limit}/{limit} used). "
+            "Resets on the 1st of next month or stack another AppSumo code."
+        )
+
+    return f"{remaining} video render(s) remaining on your {user_tier.replace('_', ' ')} plan."
 
 
 async def evaluate_quota(clerk_user_id: str, email: str | None) -> QuotaStatus:
     profile = await get_or_create_profile(clerk_user_id, email)
     plan_status = _normalize_plan(profile.get("plan_status"))
+    user_tier = resolve_user_tier(profile)
     has_reviewed = bool(profile.get("has_reviewed"))
+    appsumo_codes_count = int(profile.get("appsumo_codes_count") or 0)
     limit, period = _limits_for_profile(profile)
+
+    if limit == UNLIMITED_LIMIT:
+        used = 0
+        if _supabase_configured():
+            try:
+                used = await _supabase_count_usage(clerk_user_id, _month_start_utc())
+            except Exception as exc:
+                logger.warning(
+                    "Supabase usage count failed for %s — using local fallback: %s",
+                    clerk_user_id,
+                    exc,
+                )
+                used = _local_count_usage(clerk_user_id, _month_start_utc())
+        else:
+            used = _local_count_usage(clerk_user_id, _month_start_utc())
+
+        return QuotaStatus(
+            allowed=True,
+            plan_status=plan_status,
+            user_tier=user_tier,
+            limit=UNLIMITED_LIMIT,
+            used=used,
+            period=period,
+            message=_quota_message(
+                allowed=True,
+                user_tier=user_tier,
+                limit=limit,
+                used=used,
+                remaining=UNLIMITED_LIMIT,
+            ),
+            has_reviewed=has_reviewed,
+            appsumo_codes_count=appsumo_codes_count,
+        )
+
     since = _month_start_utc() if period == "monthly" else None
 
     used = 0
@@ -234,35 +334,24 @@ async def evaluate_quota(clerk_user_id: str, email: str | None) -> QuotaStatus:
         used = _local_count_usage(clerk_user_id, since)
 
     remaining = max(limit - used, 0)
-    if remaining <= 0:
-        if plan_status == "free":
-            message = (
-                f"Free tier limit reached ({FREE_LIFETIME_LIMIT} video total). "
-                "Upgrade to Pro for more renders."
-            )
-        else:
-            message = (
-                f"Monthly video limit reached ({limit}/{limit} used). "
-                "Resets on the 1st of next month or upgrade your plan."
-            )
-        return QuotaStatus(
-            allowed=False,
-            plan_status=plan_status,
-            limit=limit,
-            used=used,
-            period=period,
-            message=message,
-            has_reviewed=has_reviewed,
-        )
+    allowed = remaining > 0
 
     return QuotaStatus(
-        allowed=True,
+        allowed=allowed,
         plan_status=plan_status,
+        user_tier=user_tier,
         limit=limit,
         used=used,
         period=period,
-        message=f"{remaining} video render(s) remaining on your {plan_status} plan.",
+        message=_quota_message(
+            allowed=allowed,
+            user_tier=user_tier,
+            limit=limit,
+            used=used,
+            remaining=remaining,
+        ),
         has_reviewed=has_reviewed,
+        appsumo_codes_count=appsumo_codes_count,
     )
 
 
@@ -272,6 +361,7 @@ async def enforce_bake_quota(clerk_user_id: str | None, email: str | None) -> Qu
             QuotaStatus(
                 allowed=False,
                 plan_status="unknown",
+                user_tier="free",
                 limit=0,
                 used=0,
                 period="lifetime",

@@ -67,7 +67,7 @@ from appsumo_codes import (
     is_valid_code_format,
     normalize_appsumo_code,
     redeem_appsumo_code,
-    upgrade_user_to_lifetime_plan,
+    upgrade_user_appsumo_tier,
 )
 
 if os.getenv("SHOTSTACK_KEY") or os.getenv("SHOTSTACK_API_KEY"):
@@ -696,17 +696,24 @@ async def activate_appsumo_code(request: AppSumoActivateRequest):
 
     try:
         redeemed = await redeem_appsumo_code(clean_code, clerk_user_id)
-        profile = await upgrade_user_to_lifetime_plan(clerk_user_id, email)
+        profile = await upgrade_user_appsumo_tier(clerk_user_id, email)
+        user_tier = (profile.get("user_tier") or "appsumo_tier1").lower()
+        appsumo_codes_count = int(profile.get("appsumo_codes_count") or 1)
         logger.info(
-            "[APPSUMO] Code %s redeemed by clerk_user_id=%s",
+            "[APPSUMO] Code %s redeemed by clerk_user_id=%s tier=%s count=%s",
             clean_code,
             clerk_user_id,
+            user_tier,
+            appsumo_codes_count,
         )
         return {
             "success": True,
-            "message": "AppSumo code activated. Your account now has lifetime access.",
+            "message": profile.get("activation_message")
+            or "AppSumo code activated. Your tier has been upgraded.",
             "code": clean_code,
             "plan_status": (profile.get("plan_status") or "LTD").lower(),
+            "user_tier": user_tier,
+            "appsumo_codes_count": appsumo_codes_count,
             "lifetime_plan": True,
             "redeemed_at": redeemed.get("used_at"),
             "clerk_user_id": clerk_user_id,
@@ -897,10 +904,16 @@ async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional
         from usage_quota import evaluate_quota
 
         status = await evaluate_quota(clean_user_id, email)
-        remaining = max(status.limit - status.used, 0)
+        remaining = (
+            -1
+            if status.limit < 0
+            else max(status.limit - status.used, 0)
+        )
         return {
             "success": True,
             "plan_status": status.plan_status,
+            "user_tier": status.user_tier,
+            "appsumo_codes_count": status.appsumo_codes_count,
             "limit": status.limit,
             "used": status.used,
             "remaining": remaining,
@@ -941,7 +954,8 @@ async def start_video_baking_pipeline(
     try:
         quota_status = await enforce_bake_quota(request.clerk_user_id, request.email)
         print(
-            f"[📊 QUOTA] User {request.clerk_user_id} | plan={quota_status.plan_status} "
+            f"[📊 QUOTA] User {request.clerk_user_id} | tier={quota_status.user_tier} "
+            f"| plan={quota_status.plan_status} "
             f"| used={quota_status.used}/{quota_status.limit} ({quota_status.period})"
         )
     except QuotaExceededError as quota_err:
@@ -952,6 +966,7 @@ async def start_video_baking_pipeline(
                 "code": "quota_exceeded",
                 "message": status.message,
                 "plan_status": status.plan_status,
+                "user_tier": status.user_tier,
                 "limit": status.limit,
                 "used": status.used,
                 "period": status.period,

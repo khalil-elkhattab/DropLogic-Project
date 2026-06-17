@@ -7,6 +7,8 @@ export const runtime = 'nodejs';
 const FALLBACK_QUOTA = {
   success: true,
   plan_status: 'free',
+  user_tier: 'free',
+  appsumo_codes_count: 0,
   limit: Number(process.env.NEXT_PUBLIC_FREE_TIER_VIDEO_LIMIT || 5),
   used: 0,
   remaining: Number(process.env.NEXT_PUBLIC_FREE_TIER_VIDEO_LIMIT || 5),
@@ -47,7 +49,10 @@ export async function GET() {
     const data = await response.json();
     return NextResponse.json({
       ...data,
-      allowed: typeof data.allowed === 'boolean' ? data.allowed : data.remaining > 0,
+      allowed:
+        typeof data.allowed === 'boolean'
+          ? data.allowed
+          : data.limit < 0 || data.remaining > 0,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
