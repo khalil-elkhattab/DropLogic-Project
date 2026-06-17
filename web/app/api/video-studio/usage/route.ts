@@ -14,6 +14,7 @@ const FALLBACK_QUOTA = {
   period: 'lifetime',
   message: 'Usage metrics temporarily unavailable.',
   degraded: true,
+  has_reviewed: false,
 };
 
 export async function GET() {

@@ -1,10 +1,11 @@
-/** Dashboard routes use Clerk hooks — skip static prerender at build time. */
 export const dynamic = 'force-dynamic';
+
+import DashboardClientLayout from './DashboardClientLayout';
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return <DashboardClientLayout>{children}</DashboardClientLayout>;
 }

@@ -3,6 +3,7 @@ import React from 'react';
 import { UserButton } from "@clerk/clerk-react";
 import { useRouter } from 'next/navigation';
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
+import DashboardQuotaBadge from '@/components/dashboard/DashboardQuotaBadge';
 
 export default function DashboardLaunchpad() {
   const router = useRouter();
@@ -21,6 +22,10 @@ export default function DashboardLaunchpad() {
     router.push('/dashboard/history');
   };
 
+  const handleNavigateToRoadmap = () => {
+    router.push('/dashboard/roadmap');
+  };
+
   return (
     <div className="dl-page dl-page-elevated font-sans antialiased relative overflow-hidden">
       
@@ -34,17 +39,11 @@ export default function DashboardLaunchpad() {
             <span className="text-violet-300 border-b-2 border-violet-500 pb-1 cursor-pointer">Workspace</span>
             <span onClick={handleNavigateToPricing} className="hover:text-violet-300 cursor-pointer transition text-violet-400 font-black">⚡ Pricing</span>
             <span onClick={handleNavigateToHistory} className="hover:text-violet-300 cursor-pointer transition">Ad History</span>
-            <span className="hover:text-violet-300 cursor-pointer transition">Neural_Feed</span>
-            <span className="hover:text-violet-300 cursor-pointer transition">Settings</span>
+            <span onClick={handleNavigateToRoadmap} className="hover:text-violet-300 cursor-pointer transition">Roadmap</span>
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <div 
-            onClick={handleNavigateToPricing}
-            className="text-[9px] font-mono font-bold text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 px-2.5 py-1 rounded border border-violet-500/25 cursor-pointer transition tracking-wider uppercase"
-          >
-            Credits: <span className="font-black">3 Left</span> 🔒
-          </div>
+          <DashboardQuotaBadge />
           <div className="hidden sm:block text-[9px] font-mono font-bold text-green-400 bg-green-500/10 px-2 py-1 rounded border border-green-500/20">
             ENGINE_STABLE_200ms
           </div>

@@ -11,6 +11,7 @@ import TikTokPreviewOverlay from '@/components/publish/TikTokPreviewOverlay';
 import ProxiedVideoPlayer from '@/components/results/ProxiedVideoPlayer';
 import { buildBackendAssetUrl, getApiUrl, resolveBakedVideoUrl } from '@/lib/backend';
 import { downloadVideoFile } from '@/lib/download';
+import AppSumoJoyModal, { scheduleAppSumoJoyPrompt } from '@/components/review/AppSumoJoyModal';
 
 
 
@@ -51,7 +52,9 @@ function SuccessPublishContent() {
 
   const incomingCaption = searchParams.get('caption') || "This viral Amazon gadget completely transformed my room! 🤫✨";
 
+  const [showJoyModal, setShowJoyModal] = useState(false);
   const autoDownload = searchParams.get('autoDownload') === '1';
+  const joyPrompt = searchParams.get('joyPrompt') === '1';
 
 
 
@@ -226,6 +229,7 @@ function SuccessPublishContent() {
   const handleDownload = async () => {
     if (!sourceVideoUrl) return;
 
+    scheduleAppSumoJoyPrompt(() => setShowJoyModal(true));
     setIsDownloading(true);
     try {
       await downloadVideoFile(sourceVideoUrl);
@@ -243,6 +247,14 @@ function SuccessPublishContent() {
     void handleDownload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoDownload, sourceVideoUrl, isLoading]);
+
+  useEffect(() => {
+    if (!joyPrompt || isLoading || !sourceVideoUrl) return;
+    if (sessionStorage.getItem('droplogic_pending_joy') === '1') {
+      sessionStorage.removeItem('droplogic_pending_joy');
+    }
+    scheduleAppSumoJoyPrompt(() => setShowJoyModal(true));
+  }, [joyPrompt, isLoading, sourceVideoUrl]);
 
 
 
@@ -568,6 +580,8 @@ function SuccessPublishContent() {
         </section>
 
       </main>
+
+      <AppSumoJoyModal open={showJoyModal} onClose={() => setShowJoyModal(false)} />
 
     </div>
 

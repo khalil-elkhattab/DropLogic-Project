@@ -153,6 +153,12 @@ class AppSumoActivateRequest(BaseModel):
     clerk_user_id: str
     email: Optional[str] = None
 
+
+class ReviewProofRequest(BaseModel):
+    clerk_user_id: str
+    proof: str
+    email: Optional[str] = None
+
 class StudioScriptRequest(BaseModel):
     product_name: str
     angle: str           
@@ -726,6 +732,52 @@ async def activate_appsumo_code(request: AppSumoActivateRequest):
         ) from exc
 
 
+@app.post(
+    "/api/submit-review-proof",
+    summary="Submit AppSumo review proof and unlock permanent 50 videos/month quota",
+)
+async def submit_review_proof_endpoint(request: ReviewProofRequest):
+    from review_rewards import (
+        ReviewAlreadyClaimedError,
+        ReviewProofError,
+        ReviewProofInvalidError,
+        submit_review_proof,
+    )
+    from usage_quota import evaluate_quota
+
+    clerk_user_id = (request.clerk_user_id or "").strip()
+    email = (request.email or "").strip() or None
+    proof = (request.proof or "").strip()
+
+    if not clerk_user_id:
+        raise HTTPException(status_code=400, detail="clerk_user_id is required")
+    if not proof:
+        raise HTTPException(status_code=400, detail="Review proof is required")
+
+    try:
+        profile = await submit_review_proof(clerk_user_id, email, proof)
+        quota = await evaluate_quota(clerk_user_id, email)
+        logger.info("[REVIEW] Proof submitted by clerk_user_id=%s", clerk_user_id)
+        return {
+            "success": True,
+            "message": "Review upgrade unlocked! Your monthly limit is now 50 videos.",
+            "has_reviewed": True,
+            "monthly_video_limit": profile.get("monthly_video_limit"),
+            "plan_status": quota.plan_status,
+            "limit": quota.limit,
+            "used": quota.used,
+            "remaining": max(quota.limit - quota.used, 0),
+            "period": quota.period,
+        }
+    except ReviewProofInvalidError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ReviewAlreadyClaimedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ReviewProofError as exc:
+        logger.error("[REVIEW] Submit failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not save review proof. Please try again.") from exc
+
+
 # ----------------------------------------------------------------------
 # 2. Hybrid Groq & OpenRouter Script Studio Engine
 # ----------------------------------------------------------------------
@@ -855,6 +907,7 @@ async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional
             "allowed": status.allowed,
             "period": status.period,
             "message": status.message,
+            "has_reviewed": status.has_reviewed,
         }
     except Exception as exc:
         logger.warning("Usage quota degraded to safe defaults for %s: %s", clean_user_id, exc, exc_info=True)
@@ -869,6 +922,7 @@ async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional
             "period": "lifetime",
             "message": "Usage metrics temporarily unavailable — baking allowed.",
             "degraded": True,
+            "has_reviewed": False,
         }
 
 

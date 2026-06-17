@@ -15,6 +15,8 @@ export type VideoQuota = {
   period: 'lifetime' | 'monthly' | string;
   allowed: boolean;
   message?: string;
+  has_reviewed?: boolean;
+  degraded?: boolean;
 };
 
 export function isFreeTierLimitReached(quota: VideoQuota | null): boolean {

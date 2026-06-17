@@ -18,7 +18,8 @@ import {
   isFreeTierLimitReached,
   type VideoQuota,
 } from '@/lib/quota';
-import { PLAN_UPDATED_EVENT } from '@/lib/plan-events';
+import { PLAN_UPDATED_EVENT, QUOTA_UPDATED_EVENT } from '@/lib/plan-events';
+import AppSumoJoyModal, { scheduleAppSumoJoyPrompt } from '@/components/review/AppSumoJoyModal';
 
 function parseScriptEngine(engine: Record<string, unknown>, productName: string): AdScript {
   const defaults = createDefaultScript(productName);
@@ -115,7 +116,11 @@ function AIStudioContent() {
     };
 
     window.addEventListener(PLAN_UPDATED_EVENT, handlePlanUpdated);
-    return () => window.removeEventListener(PLAN_UPDATED_EVENT, handlePlanUpdated);
+    window.addEventListener(QUOTA_UPDATED_EVENT, handlePlanUpdated);
+    return () => {
+      window.removeEventListener(PLAN_UPDATED_EVENT, handlePlanUpdated);
+      window.removeEventListener(QUOTA_UPDATED_EVENT, handlePlanUpdated);
+    };
   }, [loadVideoQuota]);
 
   useEffect(() => {
@@ -279,6 +284,9 @@ function AIStudioContent() {
 
         try {
           await downloadVideoFile(videoUrl);
+          scheduleAppSumoJoyPrompt(() => {
+            sessionStorage.setItem('droplogic_pending_joy', '1');
+          });
         } catch (downloadErr) {
           console.warn('Auto-download will retry on publish page:', downloadErr);
         }
@@ -288,6 +296,7 @@ function AIStudioContent() {
           videoUrl,
           caption: marketingCaption,
           autoDownload: '1',
+          joyPrompt: '1',
         });
         if (renderId) params.set('renderId', renderId);
         if (incomingAnalysisId) params.set('analysisId', incomingAnalysisId);

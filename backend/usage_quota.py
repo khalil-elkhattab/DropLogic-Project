@@ -16,13 +16,16 @@ SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
 
 FREE_LIFETIME_LIMIT = int(os.getenv("FREE_TIER_VIDEO_LIMIT", "1"))
-PRO_MONTHLY_LIMIT = int(os.getenv("PRO_MONTHLY_VIDEO_LIMIT", "50"))
-LTD_MONTHLY_LIMIT = int(os.getenv("LTD_MONTHLY_VIDEO_LIMIT", str(PRO_MONTHLY_LIMIT)))
+PRO_MONTHLY_BASE_LIMIT = int(os.getenv("PRO_MONTHLY_BASE_LIMIT", "30"))
+PRO_MONTHLY_REVIEWED_LIMIT = int(os.getenv("PRO_MONTHLY_REVIEWED_LIMIT", "50"))
+PRO_MONTHLY_LIMIT = int(os.getenv("PRO_MONTHLY_VIDEO_LIMIT", str(PRO_MONTHLY_BASE_LIMIT)))
+LTD_MONTHLY_LIMIT = int(os.getenv("LTD_MONTHLY_VIDEO_LIMIT", str(PRO_MONTHLY_BASE_LIMIT)))
 
 PRO_PLAN_STATUSES = {"pro", "ltd", "credits"}
 
 # Dev fallback when Supabase is not configured
 _LOCAL_USAGE: dict[str, list[float]] = {}
+_LOCAL_REVIEW_STATE: dict[str, dict[str, Any]] = {}
 
 logger = logging.getLogger("droplogic.quota")
 
@@ -35,6 +38,7 @@ class QuotaStatus:
     used: int
     period: str  # "lifetime" | "monthly"
     message: str
+    has_reviewed: bool = False
 
 
 class QuotaExceededError(Exception):
@@ -67,15 +71,27 @@ def _normalize_plan(plan_status: str | None) -> str:
     return (plan_status or "free").strip().lower()
 
 
-def _limits_for_plan(plan_status: str) -> tuple[int, str]:
-    plan = _normalize_plan(plan_status)
+def _limits_for_profile(profile: dict[str, Any]) -> tuple[int, str]:
+    plan = _normalize_plan(profile.get("plan_status"))
     if plan == "free":
         return FREE_LIFETIME_LIMIT, "lifetime"
+
+    explicit_limit = profile.get("monthly_video_limit")
+    if isinstance(explicit_limit, int) and explicit_limit > 0:
+        return explicit_limit, "monthly"
+
+    if profile.get("has_reviewed"):
+        return PRO_MONTHLY_REVIEWED_LIMIT, "monthly"
+
     if plan == "ltd":
         return LTD_MONTHLY_LIMIT, "monthly"
     if plan in PRO_PLAN_STATUSES:
-        return PRO_MONTHLY_LIMIT, "monthly"
+        return PRO_MONTHLY_BASE_LIMIT, "monthly"
     return FREE_LIFETIME_LIMIT, "lifetime"
+
+
+def _limits_for_plan(plan_status: str) -> tuple[int, str]:
+    return _limits_for_profile({"plan_status": plan_status, "has_reviewed": False})
 
 
 async def _supabase_get_profile(clerk_user_id: str) -> dict[str, Any] | None:
@@ -160,9 +176,27 @@ def _local_record_usage(clerk_user_id: str) -> None:
     _LOCAL_USAGE.setdefault(clerk_user_id, []).append(time.time())
 
 
+def supabase_configured() -> bool:
+    return _supabase_configured()
+
+
+def get_local_review_state(clerk_user_id: str) -> dict[str, Any] | None:
+    return _LOCAL_REVIEW_STATE.get(clerk_user_id)
+
+
+def set_local_review_state(clerk_user_id: str, state: dict[str, Any]) -> None:
+    _LOCAL_REVIEW_STATE[clerk_user_id] = state
+
+
 async def get_or_create_profile(clerk_user_id: str, email: str | None) -> dict[str, Any]:
     if not _supabase_configured():
-        return {"clerk_user_id": clerk_user_id, "email": email, "plan_status": "free"}
+        local_review = get_local_review_state(clerk_user_id) or {}
+        return {
+            "clerk_user_id": clerk_user_id,
+            "email": email,
+            "plan_status": "free",
+            **local_review,
+        }
 
     try:
         profile = await _supabase_get_profile(clerk_user_id)
@@ -181,7 +215,8 @@ async def get_or_create_profile(clerk_user_id: str, email: str | None) -> dict[s
 async def evaluate_quota(clerk_user_id: str, email: str | None) -> QuotaStatus:
     profile = await get_or_create_profile(clerk_user_id, email)
     plan_status = _normalize_plan(profile.get("plan_status"))
-    limit, period = _limits_for_plan(plan_status)
+    has_reviewed = bool(profile.get("has_reviewed"))
+    limit, period = _limits_for_profile(profile)
     since = _month_start_utc() if period == "monthly" else None
 
     used = 0
@@ -217,6 +252,7 @@ async def evaluate_quota(clerk_user_id: str, email: str | None) -> QuotaStatus:
             used=used,
             period=period,
             message=message,
+            has_reviewed=has_reviewed,
         )
 
     return QuotaStatus(
@@ -226,6 +262,7 @@ async def evaluate_quota(clerk_user_id: str, email: str | None) -> QuotaStatus:
         used=used,
         period=period,
         message=f"{remaining} video render(s) remaining on your {plan_status} plan.",
+        has_reviewed=has_reviewed,
     )
 
 
