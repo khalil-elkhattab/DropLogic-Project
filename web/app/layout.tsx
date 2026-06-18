@@ -7,6 +7,8 @@ import CookieConsent from '@/components/CookieConsent'
 import { clerkAppearance } from '@/lib/clerk-appearance'
 import { siteConfig } from '@/lib/site'
 
+const clerkProxyUrl = process.env.NEXT_PUBLIC_CLERK_PROXY_URL?.replace(/\/$/, '')
+
 /** Clerk auth components cannot run during static prerender without env keys. */
 export const dynamic = 'force-dynamic'
 
@@ -92,6 +94,7 @@ export default async function RootLayout({
   return (
     <ClerkProvider
       appearance={clerkAppearance}
+      proxyUrl={clerkProxyUrl || undefined}
       signInFallbackRedirectUrl="/dashboard"
       signUpFallbackRedirectUrl="/dashboard"
     >

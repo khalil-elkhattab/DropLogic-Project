@@ -16,3 +16,5 @@ Desktop.ini
 
 # Sensitive AppSumo export — never commit generated codes
 backend/appsumo_codes.csv
+.vercel
+.env*

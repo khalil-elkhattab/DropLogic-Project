@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const DEFAULT_BACKEND_ORIGIN = "http://164.90.235.14:8000";
-const DEFAULT_CLERK_PROXY_API_ORIGIN = "https://frontend-api.clerk.services";
 const DEFAULT_CLERK_PROXY_URL = "https://droplogicai.com/v1";
 
 /**
@@ -88,13 +87,6 @@ const DEPLOY_CACHE_BUST =
   process.env.VERCEL_DEPLOYMENT_ID ||
   "activate-appsumo-cache-bust-v5";
 
-const CLERK_PROXY_API_ORIGIN = normalizeRewriteOrigin(
-  process.env.CLERK_PROXY_API_ORIGIN,
-  DEFAULT_CLERK_PROXY_API_ORIGIN,
-  { defaultProtocol: "https" },
-);
-
-/** Public proxy base — must match Clerk Dashboard → Domains → proxy URL. */
 const CLERK_PROXY_URL = normalizePublicUrl(
   process.env.NEXT_PUBLIC_CLERK_PROXY_URL,
   DEFAULT_CLERK_PROXY_URL,
@@ -139,17 +131,14 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     const backend = BACKEND_ORIGIN;
-    const clerkProxyApi = CLERK_PROXY_API_ORIGIN;
 
-    const beforeFiles: Array<{ source: string; destination: string }> = [
-      {
-        source: "/v1/:path*",
-        destination: `${clerkProxyApi}/v1/:path*`,
-      },
-      {
-        source: "/api/video-studio/bake",
-        destination: `${backend}/api/video-studio/bake`,
-      },
+    return {
+      // Clerk /v1/* is handled by app/v1/[[...path]]/route.ts (official proxy + required headers).
+      beforeFiles: [
+        {
+          source: "/api/video-studio/bake",
+          destination: `${backend}/api/video-studio/bake`,
+        },
         {
           source: "/api/video-studio/render-status/:path*",
           destination: `${backend}/api/video-studio/render-status/:path*`,
@@ -162,11 +151,7 @@ const nextConfig: NextConfig = {
           source: "/api/video-studio/download-audio/:path*",
           destination: `${backend}/api/video-studio/download-audio/:path*`,
         },
-      ];
-
-    return {
-      // Clerk Frontend API proxy (must run before /api catch-all).
-      beforeFiles,
+      ],
       // Catch-all for any other /api/* not handled by app/api Route Handlers.
       afterFiles: [
         {

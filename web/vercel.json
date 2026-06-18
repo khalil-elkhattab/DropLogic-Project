@@ -1,8 +1,7 @@
 {
   "build": {
     "env": {
-      "VERCEL_FORCE_NO_BUILD_CACHE": "1",
-      "DEPLOY_CACHE_BUST": "activate-appsumo-edge-bust-v5"
+      "DEPLOY_CACHE_BUST": "activate-appsumo-edge-bust-v6"
     }
   },
   "headers": [
