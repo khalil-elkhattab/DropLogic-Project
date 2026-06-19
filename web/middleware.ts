@@ -1,8 +1,8 @@
 import { clerkMiddleware } from '@clerk/nextjs/server';
 
 /**
- * Next.js 16+ uses proxy.ts (middleware.ts is deprecated).
  * Required so auth() / currentUser() work in Route Handlers and Server Components.
+ * resolveClerkRouteAuth() in API routes provides a fallback when middleware context is missing.
  */
 export default clerkMiddleware();
 
