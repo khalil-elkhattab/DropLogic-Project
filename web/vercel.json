@@ -49,6 +49,9 @@
     }
   ],
   "functions": {
+    "proxy.ts": {
+      "maxDuration": 30
+    },
     "app/api/run-analysis/route.ts": {
       "maxDuration": 15
     },

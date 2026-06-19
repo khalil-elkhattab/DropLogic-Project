@@ -1,9 +1,9 @@
-import { auth, currentUser } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import {
   activateAppSumoCodeForUser,
   AppSumoActivationError,
 } from '@/lib/appsumo-activation';
+import { resolveClerkRouteAuth } from '@/lib/clerk-route-auth';
 import { isSupabaseAdminConfigured } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
@@ -30,10 +30,12 @@ export async function POST(request: Request) {
   }
 
   let userId: string | null = null;
+  let email: string | null = null;
 
   try {
-    const authResult = await auth();
-    userId = authResult.userId;
+    const authState = await resolveClerkRouteAuth(request);
+    userId = authState.userId;
+    email = authState.email;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Authentication failed';
     console.error('[activate-appsumo-code] Clerk auth error:', message);
@@ -54,15 +56,6 @@ export async function POST(request: Request) {
   const code = (body.code || '').trim();
   if (!code) {
     return jsonError('AppSumo code is required.', 400);
-  }
-
-  let email: string | null = null;
-  try {
-    const user = await currentUser();
-    email = user?.primaryEmailAddress?.emailAddress ?? null;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not load user profile';
-    console.warn('[activate-appsumo-code] currentUser warning:', message);
   }
 
   try {
