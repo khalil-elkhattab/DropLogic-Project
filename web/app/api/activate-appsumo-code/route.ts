@@ -4,7 +4,7 @@ import {
   AppSumoActivationError,
 } from '@/lib/appsumo-activation';
 import { resolveClerkRouteAuth } from '@/lib/clerk-route-auth';
-import { isSupabaseAdminConfigured } from '@/lib/supabase/admin';
+import { isSupabaseAdminConfigured, getSupabaseAdminConfig } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,9 +20,9 @@ function jsonError(detail: string, status: number) {
 
 export async function POST(request: Request) {
   if (!isSupabaseAdminConfigured()) {
-    console.error(
-      '[activate-appsumo-code] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in server env',
-    );
+    const config = getSupabaseAdminConfig();
+    const detail = 'error' in config ? config.error : 'Supabase is not configured.';
+    console.error('[activate-appsumo-code] Supabase config error:', detail);
     return jsonError(
       'AppSumo redemption is temporarily unavailable. Please try again later.',
       503,
