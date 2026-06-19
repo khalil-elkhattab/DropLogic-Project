@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, Suspense } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { UserButton } from "@clerk/clerk-react";
+import { UserButton } from "@clerk/nextjs";
 
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import TikTokPreviewOverlay from '@/components/publish/TikTokPreviewOverlay';

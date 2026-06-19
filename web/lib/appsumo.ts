@@ -48,7 +48,11 @@ export async function activateAppSumoCode(code: string): Promise<AppSumoActivate
     const message =
       (payload as AppSumoActivateErrorBody).detail ||
       (payload as AppSumoActivateErrorBody).error ||
-      'Could not activate this AppSumo code. Please try again.';
+      (response.status === 502
+        ? 'Activation service is unreachable. Please try again in a moment.'
+        : response.status === 503
+          ? 'Activation is temporarily unavailable. Please try again later.'
+          : 'Could not activate this AppSumo code. Please try again.');
     throw new Error(message);
   }
 

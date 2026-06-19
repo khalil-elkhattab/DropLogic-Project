@@ -1,6 +1,6 @@
 "use client";
 import React from 'react';
-import { UserButton } from "@clerk/clerk-react";
+import { UserButton } from "@clerk/nextjs";
 import { useRouter } from 'next/navigation';
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import DashboardQuotaBadge from '@/components/dashboard/DashboardQuotaBadge';

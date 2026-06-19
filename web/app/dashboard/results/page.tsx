@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
-import { UserButton } from '@clerk/clerk-react';
+import { UserButton } from '@clerk/nextjs';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import NetProfitCard from '@/components/results/NetProfitCard';

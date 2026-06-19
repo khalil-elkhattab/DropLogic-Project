@@ -12,7 +12,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@clerk/clerk-react": "^5.61.6",
     "@clerk/nextjs": "^7.3.4",
     "@supabase/supabase-js": "^2.106.1",
     "lucide-react": "^1.17.0",

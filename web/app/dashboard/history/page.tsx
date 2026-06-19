@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { UserButton, useUser } from '@clerk/clerk-react';
+import { UserButton, useUser } from '@clerk/nextjs';
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import { isAllowedBackendUrl } from '@/lib/backend';
 

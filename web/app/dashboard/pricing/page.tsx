@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser } from '@clerk/clerk-react';
+import { useUser } from '@clerk/nextjs';
 import { getLtdCheckoutUrl, getProCheckoutUrl } from '@/lib/lemonsqueezy/checkout';
 import DropLogicLogo from '@/components/brand/DropLogicLogo';
 import AppSumoLaunchModal, { type CheckoutPlan } from '@/components/pricing/AppSumoLaunchModal';

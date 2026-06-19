@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useUser } from '@clerk/clerk-react';
+import { useUser } from '@clerk/nextjs';
 import type { VideoQuota } from '@/lib/quota';
 import { PLAN_UPDATED_EVENT, QUOTA_UPDATED_EVENT } from '@/lib/plan-events';
 
