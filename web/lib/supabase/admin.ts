@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
+const supabaseUrl = 'https://hlifddtiptsevnueasu.supabase.co';
+
 const PLACEHOLDER_VALUES = new Set([
   '',
   'undefined',
@@ -14,10 +16,6 @@ function cleanEnvValue(raw: string | undefined): string {
   return (raw ?? '').trim().replace(/^['"]|['"]$/g, '');
 }
 
-/**
- * Read Supabase URL from env only — never hardcoded.
- * Accepts SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL.
- */
 export function normalizeSupabaseUrl(raw: string | undefined): string | null {
   const cleaned = cleanEnvValue(raw);
   if (!cleaned || PLACEHOLDER_VALUES.has(cleaned.toLowerCase())) {
@@ -47,13 +45,6 @@ export function normalizeSupabaseUrl(raw: string | undefined): string | null {
   }
 }
 
-function resolveSupabaseUrl(): string | null {
-  return (
-    normalizeSupabaseUrl(process.env.SUPABASE_URL) ||
-    normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL)
-  );
-}
-
 function resolveServiceRoleKey(): string | null {
   const key =
     cleanEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY) ||
@@ -69,21 +60,7 @@ function resolveServiceRoleKey(): string | null {
 export function getSupabaseAdminConfig():
   | { url: string; serviceRoleKey: string }
   | { error: string } {
-  const url = resolveSupabaseUrl();
   const serviceRoleKey = resolveServiceRoleKey();
-
-  if (!url && !serviceRoleKey) {
-    return {
-      error: 'Missing SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.',
-    };
-  }
-
-  if (!url) {
-    return {
-      error:
-        'SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) is missing or invalid. Expected https://<project-ref>.supabase.co',
-    };
-  }
 
   if (!serviceRoleKey) {
     return {
@@ -91,7 +68,7 @@ export function getSupabaseAdminConfig():
     };
   }
 
-  return { url, serviceRoleKey };
+  return { url: supabaseUrl, serviceRoleKey };
 }
 
 export function createAdminClient() {
