@@ -413,3 +413,13 @@ async def download_rendered_video(remote_url: str, output_path: str) -> None:
                 handle.write(response.content)
     except httpx.UnsupportedProtocol as exc:
         raise CloudRenderError(f"Invalid rendered video URL protocol: {exc}") from exc
+    except httpx.ConnectError as exc:
+        raise CloudRenderError(
+            f"Could not download rendered video from {safe_url[:160]}: {exc}"
+        ) from exc
+    except httpx.ConnectError as exc:
+        host = getattr(getattr(exc, "request", None), "url", None)
+        host_label = getattr(host, "host", None) or safe_url
+        raise CloudRenderError(
+            f"Could not download rendered video — DNS/connect failed for {host_label}: {exc}"
+        ) from exc

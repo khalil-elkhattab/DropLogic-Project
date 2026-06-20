@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -188,9 +188,19 @@ async def _supabase_insert_usage(
         "job_id": job_id,
         "product_name": product_name,
     }
-    url = f"{get_supabase_url()}/rest/v1/video_usage"
+    supabase_url = get_supabase_url()
+    url = f"{supabase_url}/rest/v1/video_usage"
     async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(url, headers=_supabase_headers(), json=payload)
+        try:
+            response = await client.post(url, headers=_supabase_headers(), json=payload)
+        except httpx.ConnectError as exc:
+            logger.error(
+                "Supabase usage insert connect failed host=%s url=%s error=%s",
+                urlparse(supabase_url).hostname,
+                supabase_url,
+                exc,
+            )
+            raise
         if response.status_code not in (200, 201):
             raise RuntimeError(f"Supabase usage insert failed: {response.status_code} {response.text}")
 
@@ -382,6 +392,20 @@ async def record_successful_bake(
     product_name: str,
 ) -> None:
     if _supabase_configured():
-        await _supabase_insert_usage(clerk_user_id, email, job_id, product_name)
+        try:
+            await _supabase_insert_usage(clerk_user_id, email, job_id, product_name)
+        except httpx.ConnectError as exc:
+            logger.warning(
+                "Supabase usage insert unreachable (host=%s) — using local fallback: %s",
+                get_supabase_url(),
+                exc,
+            )
+            _local_record_usage(clerk_user_id)
+        except Exception as exc:
+            logger.warning(
+                "Supabase usage insert failed — using local fallback: %s",
+                exc,
+            )
+            _local_record_usage(clerk_user_id)
     else:
         _local_record_usage(clerk_user_id)

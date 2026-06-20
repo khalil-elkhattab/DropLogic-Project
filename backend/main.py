@@ -59,6 +59,7 @@ from video_baker import FFmpegBakeError, bake_final_mp4, ffmpeg_available
 from url_utils import sanitize_download_url
 from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
 from public_urls import api_public_url, backend_public_origin, static_asset_url
+from supabase_env import get_supabase_url
 from appsumo_codes import (
     AppSumoCodeAlreadyUsedError,
     AppSumoCodeNotFoundError,
@@ -1131,12 +1132,19 @@ async def start_video_baking_pipeline(
         final_video_url = static_asset_url(f"outputs/{output_video_filename}")
 
         if request.clerk_user_id:
-            await record_successful_bake(
-                request.clerk_user_id,
-                request.email,
-                job_id,
-                request.product_name,
-            )
+            try:
+                await record_successful_bake(
+                    request.clerk_user_id,
+                    request.email,
+                    job_id,
+                    request.product_name,
+                )
+            except Exception as usage_err:
+                logger.warning(
+                    "[⚠️ USAGE] Bake succeeded but usage record failed for %s: %s",
+                    request.clerk_user_id,
+                    usage_err,
+                )
             try:
                 await save_generated_ad(
                     user_id=request.clerk_user_id,
@@ -1203,6 +1211,21 @@ async def start_video_baking_pipeline(
             job_id if "job_id" in locals() else "",
         )
         raise HTTPException(status_code=502, detail=str(cloud_err)) from cloud_err
+    except httpx.ConnectError as conn_err:
+        logger.error("[🚨 PIPELINE ERROR] DNS/connect failure: %s", conn_err, exc_info=True)
+        background_tasks.add_task(
+            cleanup_bake_temp_assets,
+            temp_cleanup_paths,
+            job_id if "job_id" in locals() else "",
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Backend could not resolve an external hostname (DNS failure). "
+                f"Verify SUPABASE_URL ({get_supabase_url()}) and droplet outbound DNS. "
+                f"Original error: {conn_err}"
+            ),
+        ) from conn_err
     except Exception as e:
         logger.error("[🚨 PIPELINE ERROR]: %s", e, exc_info=True)
         background_tasks.add_task(
