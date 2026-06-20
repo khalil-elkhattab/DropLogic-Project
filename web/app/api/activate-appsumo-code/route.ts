@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server';
-import {
-  activateAppSumoCodeForUser,
-  AppSumoActivationError,
-} from '@/lib/appsumo-activation';
 import { resolveClerkRouteAuth } from '@/lib/clerk-route-auth';
-import { isSupabaseAdminConfigured, getSupabaseAdminConfig } from '@/lib/supabase/admin';
+
+const BACKEND_URL = 'http://164.90.235.14:8000';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,16 +16,6 @@ function jsonError(detail: string, status: number) {
 }
 
 export async function POST(request: Request) {
-  if (!isSupabaseAdminConfigured()) {
-    const config = getSupabaseAdminConfig();
-    const detail = 'error' in config ? config.error : 'Supabase is not configured.';
-    console.error('[activate-appsumo-code] Supabase config error:', detail);
-    return jsonError(
-      'AppSumo redemption is temporarily unavailable. Please try again later.',
-      503,
-    );
-  }
-
   let userId: string | null = null;
   let email: string | null = null;
 
@@ -59,15 +46,31 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await activateAppSumoCodeForUser(code, userId, email);
-    return NextResponse.json(result);
-  } catch (error) {
-    if (error instanceof AppSumoActivationError) {
-      return jsonError(error.message, error.status);
+    const response = await fetch(`${BACKEND_URL}/api/activate-appsumo-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({
+        code,
+        clerk_user_id: userId,
+        email,
+      }),
+    });
+
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!response.ok) {
+      const detail =
+        (typeof data.detail === 'string' && data.detail) ||
+        (typeof data.error === 'string' && data.error) ||
+        'Could not activate AppSumo code. Please try again.';
+      return jsonError(detail, response.status);
     }
 
-    const message = error instanceof Error ? error.message : 'Activation failed';
-    console.error('[activate-appsumo-code] Unexpected error:', message);
-    return jsonError('Could not activate AppSumo code. Please try again.', 500);
+    return NextResponse.json(data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Activation proxy failed';
+    console.error('[activate-appsumo-code] Backend fetch error:', message);
+    return jsonError('Activation service is unreachable. Please try again in a moment.', 502);
   }
 }
