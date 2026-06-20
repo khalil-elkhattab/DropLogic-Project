@@ -10,20 +10,17 @@ from urllib.parse import quote
 
 import httpx
 
-SUPABASE_URL = (os.getenv("SUPABASE_URL") or "https://hlifddtiptsevnueasu.supabase.co").rstrip("/")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+from supabase_env import get_supabase_service_role_key, get_supabase_url, supabase_configured
+
 
 _LOCAL_ADS: dict[str, list[dict[str, Any]]] = {}
 
 
-def _supabase_configured() -> bool:
-    return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
-
-
 def _supabase_headers(*, prefer: str | None = None) -> dict[str, str]:
+    service_role_key = get_supabase_service_role_key()
     headers = {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
         "Content-Type": "application/json",
     }
     if prefer:
@@ -46,8 +43,8 @@ async def save_generated_ad(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    if _supabase_configured():
-        url = f"{SUPABASE_URL}/rest/v1/generated_ads"
+    if supabase_configured():
+        url = f"{get_supabase_url()}/rest/v1/generated_ads"
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 url,
@@ -76,9 +73,9 @@ async def fetch_generated_ads(user_id: str, *, limit: int = 50) -> list[dict[str
     if not user_id:
         return []
 
-    if _supabase_configured():
+    if supabase_configured():
         url = (
-            f"{SUPABASE_URL}/rest/v1/generated_ads"
+            f"{get_supabase_url()}/rest/v1/generated_ads"
             f"?user_id=eq.{quote(user_id, safe='')}"
             f"&select=id,user_id,product_name,selected_hook,video_url,created_at"
             f"&order=created_at.desc"

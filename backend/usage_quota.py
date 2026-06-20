@@ -12,9 +12,11 @@ from urllib.parse import quote
 
 import httpx
 
-DEFAULT_SUPABASE_URL = "https://hlifddtiptsevnueasu.supabase.co"
-SUPABASE_URL = (os.getenv("SUPABASE_URL") or DEFAULT_SUPABASE_URL).rstrip("/")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+from supabase_env import (
+    get_supabase_service_role_key,
+    get_supabase_url,
+    supabase_configured as _supabase_configured,
+)
 
 FREE_LIFETIME_LIMIT = int(os.getenv("FREE_TIER_VIDEO_LIMIT", "5"))
 PREMIUM_MONTHLY_LIMIT = int(os.getenv("PREMIUM_MONTHLY_VIDEO_LIMIT", "200"))
@@ -58,14 +60,11 @@ class QuotaExceededError(Exception):
         self.status = status
 
 
-def _supabase_configured() -> bool:
-    return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
-
-
 def _supabase_headers(*, prefer: str | None = None) -> dict[str, str]:
+    service_role_key = get_supabase_service_role_key()
     headers = {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
         "Content-Type": "application/json",
     }
     if prefer:
@@ -126,7 +125,7 @@ def _limits_for_profile(profile: dict[str, Any]) -> tuple[int, str]:
 
 async def _supabase_get_profile(clerk_user_id: str) -> dict[str, Any] | None:
     url = (
-        f"{SUPABASE_URL}/rest/v1/profiles"
+        f"{get_supabase_url()}/rest/v1/profiles"
         f"?clerk_user_id=eq.{quote(clerk_user_id, safe='')}&select=*&limit=1"
     )
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -145,7 +144,7 @@ async def _supabase_upsert_profile(clerk_user_id: str, email: str | None) -> dic
         "user_tier": "free",
         "appsumo_codes_count": 0,
     }
-    url = f"{SUPABASE_URL}/rest/v1/profiles?on_conflict=clerk_user_id"
+    url = f"{get_supabase_url()}/rest/v1/profiles?on_conflict=clerk_user_id"
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(
             url,
@@ -163,7 +162,7 @@ async def _supabase_count_usage(clerk_user_id: str, since: datetime | None = Non
     if since is not None:
         query += f"&created_at=gte.{since.isoformat()}"
 
-    url = f"{SUPABASE_URL}/rest/v1/video_usage?{query}"
+    url = f"{get_supabase_url()}/rest/v1/video_usage?{query}"
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.get(
             url,
@@ -189,7 +188,7 @@ async def _supabase_insert_usage(
         "job_id": job_id,
         "product_name": product_name,
     }
-    url = f"{SUPABASE_URL}/rest/v1/video_usage"
+    url = f"{get_supabase_url()}/rest/v1/video_usage"
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(url, headers=_supabase_headers(), json=payload)
         if response.status_code not in (200, 201):

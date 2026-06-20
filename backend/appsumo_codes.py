@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import secrets
 import string
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
+from supabase_env import get_supabase_service_role_key, get_supabase_url, supabase_configured
 from usage_quota import get_or_create_profile, tier_from_appsumo_codes_count
 
 logger = logging.getLogger("droplogic.appsumo")
-
-DEFAULT_SUPABASE_URL = "https://hlifddtiptsevnueasu.supabase.co"
-SUPABASE_URL = (os.getenv("SUPABASE_URL") or DEFAULT_SUPABASE_URL).rstrip("/")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
 
 CODE_PREFIX = "DROPLOGIC-AS-"
 CODE_SUFFIX_LENGTH = 5
@@ -45,14 +41,11 @@ class AppSumoCodeAlreadyUsedError(AppSumoServiceError):
     """The code has already been redeemed."""
 
 
-def supabase_configured() -> bool:
-    return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
-
-
 def _supabase_headers(*, prefer: str | None = None) -> dict[str, str]:
+    service_role_key = get_supabase_service_role_key()
     headers = {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
         "Content-Type": "application/json",
     }
     if prefer:
@@ -99,7 +92,7 @@ def insert_codes_bulk(codes: list[str], *, batch_size: int = 100) -> int:
         raise AppSumoNotConfiguredError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
 
     inserted = 0
-    url = f"{SUPABASE_URL}/rest/v1/appsumo_codes"
+    url = f"{get_supabase_url()}/rest/v1/appsumo_codes"
 
     with httpx.Client(timeout=60.0) as client:
         for start in range(0, len(codes), batch_size):
@@ -120,7 +113,7 @@ def insert_codes_bulk(codes: list[str], *, batch_size: int = 100) -> int:
 
 async def _fetch_code_row(code: str) -> dict[str, Any] | None:
     url = (
-        f"{SUPABASE_URL}/rest/v1/appsumo_codes"
+        f"{get_supabase_url()}/rest/v1/appsumo_codes"
         f"?code=eq.{quote(code, safe='')}&select=*&limit=1"
     )
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -140,8 +133,9 @@ async def redeem_appsumo_code(code: str, clerk_user_id: str) -> dict[str, Any]:
         raise AppSumoNotConfiguredError("AppSumo redemption is not configured on this server")
 
     redeemed_at = datetime.now(timezone.utc).isoformat()
+    supabase_url = get_supabase_url()
     url = (
-        f"{SUPABASE_URL}/rest/v1/appsumo_codes"
+        f"{supabase_url}/rest/v1/appsumo_codes"
         f"?code=eq.{quote(code, safe='')}&is_used=eq.false"
     )
     payload = {
@@ -151,11 +145,22 @@ async def redeem_appsumo_code(code: str, clerk_user_id: str) -> dict[str, Any]:
     }
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.patch(
-            url,
-            headers=_supabase_headers(prefer="return=representation"),
-            json=payload,
-        )
+        try:
+            response = await client.patch(
+                url,
+                headers=_supabase_headers(prefer="return=representation"),
+                json=payload,
+            )
+        except httpx.ConnectError as exc:
+            logger.error(
+                "[APPSUMO] Supabase connect failed host=%s url=%s error=%s",
+                urlparse(supabase_url).hostname,
+                supabase_url,
+                exc,
+            )
+            raise AppSumoServiceError(
+                f"Cannot reach Supabase at {supabase_url}. Check SUPABASE_URL in backend/.env."
+            ) from exc
         if response.status_code not in (200, 204):
             raise AppSumoServiceError(
                 f"Supabase code redeem failed ({response.status_code}): {response.text[:300]}"
@@ -207,7 +212,7 @@ async def upgrade_user_appsumo_tier(clerk_user_id: str, email: str | None) -> di
 
     updated_at = datetime.now(timezone.utc).isoformat()
     url = (
-        f"{SUPABASE_URL}/rest/v1/profiles"
+        f"{get_supabase_url()}/rest/v1/profiles"
         f"?clerk_user_id=eq.{quote(clerk_user_id, safe='')}"
     )
     payload: dict[str, Any] = {

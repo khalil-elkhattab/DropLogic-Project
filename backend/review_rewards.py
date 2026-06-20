@@ -15,8 +15,8 @@ from usage_quota import (
     set_local_review_state,
     supabase_configured,
     _supabase_headers,
-    SUPABASE_URL,
 )
+from supabase_env import get_supabase_url
 
 logger = logging.getLogger("droplogic.review_rewards")
 
@@ -64,7 +64,7 @@ async def submit_review_proof(
 
     updated_at = datetime.now(timezone.utc).isoformat()
     url = (
-        f"{SUPABASE_URL}/rest/v1/profiles"
+        f"{get_supabase_url()}/rest/v1/profiles"
         f"?clerk_user_id=eq.{quote(clerk_user_id, safe='')}"
     )
     payload = {
