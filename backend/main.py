@@ -83,17 +83,29 @@ app = FastAPI(
 )
 
 
-CORS_ALLOWED_ORIGINS = [
-    "https://www.droplogicai.com",
-    "https://droplogicai.com",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+def _build_cors_origins() -> list[str]:
+    origins = [
+        "https://www.droplogicai.com",
+        "https://droplogicai.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    extra = os.getenv("CORS_ALLOWED_ORIGINS", "")
+    for item in extra.split(","):
+        cleaned = item.strip()
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
+    return origins
+
+
+# Set CORS_ALLOW_ALL=true to allow any origin (credentials disabled — browser only).
+_cors_allow_all = os.getenv("CORS_ALLOW_ALL", "").strip().lower() in ("1", "true", "yes")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"] if _cors_allow_all else _build_cors_origins(),
+    allow_origin_regex=None if _cors_allow_all else r"https://.*\.vercel\.app",
+    allow_credentials=not _cors_allow_all,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -1392,4 +1404,6 @@ async def get_all_published_assets_safe():
 
 if __name__ == "__main__":
     import uvicorn
+
+    # Bind all interfaces so DigitalOcean / Docker can reach the API (not loopback-only).
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

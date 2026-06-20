@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import httpx
 
-SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or "https://hlifddtiptsevnueasu.supabase.co").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
 
 _LOCAL_ADS: dict[str, list[dict[str, Any]]] = {}

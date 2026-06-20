@@ -12,7 +12,8 @@ from urllib.parse import quote
 
 import httpx
 
-SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+DEFAULT_SUPABASE_URL = "https://hlifddtiptsevnueasu.supabase.co"
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or DEFAULT_SUPABASE_URL).rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
 
 FREE_LIFETIME_LIMIT = int(os.getenv("FREE_TIER_VIDEO_LIMIT", "5"))
