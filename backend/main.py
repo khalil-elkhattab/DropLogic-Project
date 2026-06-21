@@ -41,25 +41,26 @@ except ImportError:
     async def fetch_all_platforms_assets(clean_input): return [], ""
 
 # 🟢 STRICT AUDIO ENGINE IMPORT (No more hidden fallbacks / No more warnings)
-from audio_processor import generate_voice_over, mix_voice_and_background
-from usage_quota import QuotaExceededError, enforce_bake_quota, record_successful_bake
-from cleanup_assets import cleanup_bake_temp_assets
-from ad_history import fetch_generated_ads, save_generated_ad
+from usage_quota import QuotaExceededError, enforce_bake_quota
+from ad_history import fetch_generated_ads
 from product_insights import build_active_competitors, build_financials, build_sales_trend
 from media_downloader import (
     cache_scraped_video,
     coerce_media_url,
-    download_media_to_file,
-    probe_media_url,
     resolve_bake_video_url,
     sanitize_asset_record,
 )
-from caption_engine import generate_burned_captions, get_media_duration_seconds
-from video_baker import FFmpegBakeError, bake_final_mp4, ffmpeg_available
 from url_utils import sanitize_download_url
-from cloud_render import CloudRenderError, download_rendered_video, fetch_cloud_render_status, render_with_failover
+from bake_jobs import (
+    RENDER_JOBS,
+    bake_queue_position,
+    bake_status_response,
+    create_bake_job,
+    run_bake_background,
+    MAX_CONCURRENT_BAKES,
+)
+from cloud_render import CloudRenderError, fetch_cloud_render_status
 from public_urls import api_public_url, backend_public_origin, static_asset_url
-from supabase_env import get_supabase_url
 from appsumo_codes import (
     AppSumoCodeAlreadyUsedError,
     AppSumoCodeNotFoundError,
@@ -125,7 +126,6 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Runtime storage for system caching and tracking local rendering jobs
 COMPUTED_CACHE: dict[str, dict[str, Any]] = {}
-RENDER_JOBS: dict[str, dict[str, Any]] = {}
 
 AnalysisJobStatus = Literal["processing", "completed", "failed"]
 ANALYSIS_JOB_TTL_SEC = 3600
@@ -952,7 +952,10 @@ async def get_video_usage_quota(clerk_user_id: str = Query(...), email: Optional
         }
 
 
-@video_studio_router.post("/bake", summary="Bake marketing assets via FFmpeg (primary) or cloud render fallback")
+@video_studio_router.post(
+    "/bake",
+    summary="Enqueue async video bake (FFmpeg + cloud fallback, concurrency-limited)",
+)
 async def start_video_baking_pipeline(
     request: VideoBakeRequest,
     background_tasks: BackgroundTasks,
@@ -962,6 +965,19 @@ async def start_video_baking_pipeline(
         raise HTTPException(
             status_code=400,
             detail="Target raw video source URL cannot be empty. Select a TikTok asset in Results and launch Studio again.",
+        )
+
+    source_video_url = resolve_bake_video_url(
+        raw_video_input,
+        backend_public_url=backend_public_origin(),
+    )
+    if not source_video_url:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Source video URL is invalid, blocked, or missing https://. "
+                f"Received: {raw_video_input[:120]!r}"
+            ),
         )
 
     try:
@@ -986,261 +1002,39 @@ async def start_video_baking_pipeline(
             },
         ) from quota_err
 
-    temp_cleanup_paths: list[str] = []
-    output_video_path = ""
+    job = create_bake_job(request)
+    background_tasks.add_task(run_bake_background, job.job_id)
 
-    try:
-        unique_id = os.urandom(4).hex()
-        print(f"\n[🚀 BAKE START] FFmpeg-first pipeline for: {request.product_name}")
+    print(
+        f"[🚀 BAKE ENQUEUED] job_id={job.job_id} product={request.product_name!r} "
+        f"(max_concurrent={MAX_CONCURRENT_BAKES})"
+    )
 
-        source_video_url = resolve_bake_video_url(
-            raw_video_input,
-            backend_public_url=backend_public_origin(),
-        )
-        if not source_video_url:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Source video URL is invalid, blocked, or missing https://. "
-                    f"Received: {raw_video_input[:120]!r}"
-                ),
-            )
-
-        probed_url = await probe_media_url(
-            source_video_url,
-            backend_public_url=backend_public_origin(),
-        )
-        if probed_url:
-            source_video_url = probed_url
-        else:
-            logger.warning(
-                "Source video probe failed for %r — continuing with sanitized URL for cloud render",
-                request.video_url[:160],
-            )
-
-        print(f"[🔗 SOURCE VIDEO] {source_video_url[:160]}...")
-
-        full_custom_script = f"{request.final_hook} {request.final_body} {request.final_cta}"
-        print("[🎙️ AI SYNTHESIS] Generating voice over via internal engine...")
-        try:
-            temp_voice_file = generate_voice_over(full_custom_script, request.selected_voice)
-            temp_cleanup_paths.append(temp_voice_file)
-        except Exception as voice_err:
-            logger.error("Voice generation failed: %s", voice_err, exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Voice synthesis failed: {voice_err}",
-            ) from voice_err
-
-        print("[🎵 AUDIO MIXER] Merging voice over with background music tracks...")
-        try:
-            mix_voice_and_background(
-                voice_path=temp_voice_file,
-                bg_music_type=request.selected_bg_music,
-                output_filename=f"mix_{unique_id}",
-            )
-        except Exception as mix_err:
-            logger.error("Audio mix failed: %s", mix_err, exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Audio mixing failed: {mix_err}",
-            ) from mix_err
-
-        final_audio_path = os.path.join(OUTPUTS_DIR, f"mix_{unique_id}.wav")
-        temp_cleanup_paths.append(final_audio_path)
-        public_audio_url = static_asset_url(f"outputs/mix_{unique_id}.wav")
-        print(f"[🔗 PUBLIC AUDIO URL] {public_audio_url}")
-
-        output_video_filename = f"final_video_{unique_id}.mp4"
-        output_video_path = os.path.join(OUTPUTS_DIR, output_video_filename)
-        audio_duration = get_media_duration_seconds(final_audio_path) or float(request.video_duration or 15.0)
-
-        temp_source_video = os.path.join(OUTPUTS_DIR, f"temp_source_{unique_id}.mp4")
-        temp_cleanup_paths.append(temp_source_video)
-
-        print("[📥 SOURCE DOWNLOAD] Fetching source video for local FFmpeg bake...")
-        downloaded = await download_media_to_file(
-            source_video_url,
-            temp_source_video,
-            backend_public_url=backend_public_origin(),
-        )
-        if not downloaded or not os.path.isfile(temp_source_video):
-            raise HTTPException(
-                status_code=502,
-                detail="Could not download source video for baking. Re-run analysis to refresh cached clips.",
-            )
-
-        ass_path: str | None = None
-        if request.burn_captions:
-            ass_output = os.path.join(OUTPUTS_DIR, f"caps_{unique_id}.ass")
-            ass_path = generate_burned_captions(
-                request.final_hook,
-                request.final_body,
-                request.final_cta,
-                final_audio_path,
-                ass_output,
-                fallback_duration=audio_duration,
-            )
-            if ass_path:
-                temp_cleanup_paths.append(ass_path)
-
-        job_id = f"local_{unique_id}"
-        provider = "ffmpeg"
-        bake_message = "Local FFmpeg bake completed (9:16 vertical, video looped to audio length)."
-
-        if ffmpeg_available():
-            print("[🎬 FFMPEG BAKE] Looping source video to audio duration + 1080x1920 crop...")
-            RENDER_JOBS[job_id] = {"status": "rendering", "file_path": output_video_path, "provider": provider}
-            try:
-                await asyncio.to_thread(
-                    bake_final_mp4,
-                    source_video_path=temp_source_video,
-                    audio_path=final_audio_path,
-                    output_path=output_video_path,
-                    anti_ban_filter=request.anti_ban_filter,
-                    subtitle_path=ass_path,
-                )
-            except FFmpegBakeError as ffmpeg_err:
-                logger.warning("[FFmpeg] Local bake failed, falling back to cloud render: %s", ffmpeg_err)
-                provider = None
-            else:
-                RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path, "provider": provider}
-        else:
-            logger.warning("[FFmpeg] Not available on server — using cloud render fallback")
-            provider = None
-
-        if provider is None:
-            print("[☁️ CLOUD RENDER] Submitting to Json2Video with Renderform failover...")
-            cloud_job = await asyncio.to_thread(
-                render_with_failover,
-                video_url=source_video_url,
-                audio_url=public_audio_url,
-                product_name=request.product_name,
-                duration=audio_duration,
-            )
-
-            job_id = cloud_job.combined_id
-            provider = cloud_job.provider
-            bake_message = f"Cloud render completed via {provider} with automatic failover support."
-            RENDER_JOBS[job_id] = {"status": "rendering", "file_path": output_video_path, "provider": provider}
-
-            print(f"[📥 CLOUD DOWNLOAD] Persisting rendered asset from {provider}...")
-            await download_rendered_video(cloud_job.final_video_url, output_video_path)
-
-            RENDER_JOBS[job_id] = {"status": "done", "file_path": output_video_path, "provider": provider}
-
-        final_video_url = static_asset_url(f"outputs/{output_video_filename}")
-
-        if request.clerk_user_id:
-            try:
-                await record_successful_bake(
-                    request.clerk_user_id,
-                    request.email,
-                    job_id,
-                    request.product_name,
-                )
-            except Exception as usage_err:
-                logger.warning(
-                    "[⚠️ USAGE] Bake succeeded but usage record failed for %s: %s",
-                    request.clerk_user_id,
-                    usage_err,
-                )
-            try:
-                await save_generated_ad(
-                    user_id=request.clerk_user_id,
-                    product_name=request.product_name,
-                    selected_hook=request.final_hook,
-                    video_url=final_video_url,
-                )
-                print(f"[📚 AD HISTORY] Saved generated ad for user {request.clerk_user_id}")
-            except Exception as history_err:
-                print(f"[⚠️ AD HISTORY] Failed to persist ad record: {history_err}")
-
-        clean_tags = request.product_name.replace(" ", "").lower()
-        
-        print(f"[🚀 CONNECTION RELEASED] Video is 100% baked and ready on storage. Responding to Frontend.")
-
-        background_tasks.add_task(
-            cleanup_bake_temp_assets,
-            temp_cleanup_paths,
-            job_id,
-            preserve_paths=[output_video_path],
-        )
-
-        return {
+    return JSONResponse(
+        status_code=202,
+        content={
             "success": True,
-            "message": bake_message,
-            "render_id": job_id,
-            "provider": provider,
-            "final_video_url": final_video_url,
-            "check_status_url": api_public_url(f"video-studio/render-status/{job_id}"),
-            "marketing_assets": {
-                "video_caption": f"{request.final_hook} 🤫✨",
-                "primary_ad_copy": f"Stop scrolling! 🚨 Viral {request.product_name} completely flips your setup upside down. Get 50% OFF tonight only. Free Worldwide Shipping included! {request.final_cta}",
-                "trending_hashtags": f"#dropshipping #viralproduct #tiktokmademebuyit #amazonfinds #{clean_tags} #ecommerce"
-            }
-        }
-
-    except HTTPException:
-        background_tasks.add_task(
-            cleanup_bake_temp_assets,
-            temp_cleanup_paths,
-            job_id if "job_id" in locals() else "",
-        )
-        raise
-    except httpx.UnsupportedProtocol as proto_err:
-        logger.error("[🚨 PIPELINE ERROR] Invalid URL protocol: %s", proto_err)
-        background_tasks.add_task(
-            cleanup_bake_temp_assets,
-            temp_cleanup_paths,
-            job_id if "job_id" in locals() else "",
-        )
-        raise HTTPException(
-            status_code=400,
-            detail="Video URL is missing http:// or https:// — please re-select a video from analysis results.",
-        ) from proto_err
-    except CloudRenderError as cloud_err:
-        err_text = str(cloud_err).lower()
-        if "shotstack" in err_text:
-            logger.warning("Legacy Shotstack error bypassed: %s", cloud_err)
-        else:
-            logger.error("[🚨 CLOUD RENDER ERROR]: %s", cloud_err)
-        background_tasks.add_task(
-            cleanup_bake_temp_assets,
-            temp_cleanup_paths,
-            job_id if "job_id" in locals() else "",
-        )
-        raise HTTPException(status_code=502, detail=str(cloud_err)) from cloud_err
-    except httpx.ConnectError as conn_err:
-        logger.error("[🚨 PIPELINE ERROR] DNS/connect failure: %s", conn_err, exc_info=True)
-        background_tasks.add_task(
-            cleanup_bake_temp_assets,
-            temp_cleanup_paths,
-            job_id if "job_id" in locals() else "",
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Backend could not resolve an external hostname (DNS failure). "
-                f"Verify SUPABASE_URL ({get_supabase_url()}) and droplet outbound DNS. "
-                f"Original error: {conn_err}"
-            ),
-        ) from conn_err
-    except Exception as e:
-        logger.error("[🚨 PIPELINE ERROR]: %s", e, exc_info=True)
-        background_tasks.add_task(
-            cleanup_bake_temp_assets,
-            temp_cleanup_paths,
-            job_id if "job_id" in locals() else "",
-        )
-        raise HTTPException(status_code=500, detail=f"Internal Baking pipeline failed: {str(e)}") from e
+            "accepted": True,
+            "status": "queued",
+            "render_id": job.job_id,
+            "job_id": job.job_id,
+            "queue_position": bake_queue_position(job.job_id) or 1,
+            "max_concurrent_bakes": MAX_CONCURRENT_BAKES,
+            "message": "Video bake queued. Poll render-status until done.",
+            "check_status_url": api_public_url(f"video-studio/render-status/{job.job_id}"),
+        },
+    )
 
 
 # ----------------------------------------------------------------------
 # 📌 Local Rendering Task Tracking Hub
 # ----------------------------------------------------------------------
-@video_studio_router.get("/render-status/{render_id}", summary="Fetch final cloud video asset link once processing finishes")
+@video_studio_router.get("/render-status/{render_id}", summary="Fetch bake/cloud render status")
 async def get_render_status(render_id: str):
+    bake_status = bake_status_response(render_id)
+    if bake_status:
+        return bake_status
+
     if render_id.startswith(("json2video_", "renderform_")):
         try:
             return await asyncio.to_thread(fetch_cloud_render_status, render_id)

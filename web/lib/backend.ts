@@ -144,6 +144,6 @@ export function isAllowedBackendUrl(url: string): boolean {
 }
 
 export function resolveBakedVideoUrl(renderId: string): string {
-  const uniqueId = renderId.replace(/^local_bake_/, '');
+  const uniqueId = renderId.replace(/^(local_bake_|bake_|local_)/, '');
   return buildBackendAssetUrl(`/static/outputs/final_video_${uniqueId}.mp4`);
 }

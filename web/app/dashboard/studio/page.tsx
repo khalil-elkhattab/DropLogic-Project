@@ -21,6 +21,51 @@ import {
 import { PLAN_UPDATED_EVENT, QUOTA_UPDATED_EVENT } from '@/lib/plan-events';
 import AppSumoJoyModal, { scheduleAppSumoJoyPrompt } from '@/components/review/AppSumoJoyModal';
 
+const BAKE_POLL_INTERVAL_MS = 2500;
+const BAKE_POLL_MAX_ATTEMPTS = 180;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type BakeStatusPayload = {
+  status?: string;
+  queue_position?: number;
+  final_video_url?: string | null;
+  error?: string | null;
+  marketing_assets?: { video_caption?: string };
+  message?: string;
+};
+
+async function pollBakeUntilComplete(
+  jobId: string,
+  onProgress: (status: BakeStatusPayload) => void,
+): Promise<BakeStatusPayload> {
+  for (let attempt = 0; attempt < BAKE_POLL_MAX_ATTEMPTS; attempt += 1) {
+    const statusRes = await fetch(
+      getApiUrl(`/api/video-studio/render-status/${encodeURIComponent(jobId)}`),
+      { cache: 'no-store' },
+    );
+    if (!statusRes.ok) {
+      throw new Error(`Bake status check failed (${statusRes.status})`);
+    }
+
+    const statusJson = (await statusRes.json()) as BakeStatusPayload;
+    onProgress(statusJson);
+
+    if (statusJson.status === 'done' && statusJson.final_video_url) {
+      return statusJson;
+    }
+    if (statusJson.status === 'failed') {
+      throw new Error(statusJson.error || 'Video baking failed on the server.');
+    }
+
+    await sleep(BAKE_POLL_INTERVAL_MS);
+  }
+
+  throw new Error('Video baking timed out. Your job may still be queued — check History in a minute.');
+}
+
 function parseScriptEngine(engine: Record<string, unknown>, productName: string): AdScript {
   const defaults = createDefaultScript(productName);
   const hookOptionsRaw = engine.hook_options;
@@ -81,6 +126,7 @@ function AIStudioContent() {
   const [burnCaptions, setBurnCaptions] = useState(true);
   const [isRendering, setIsRendering] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [bakeStatusMessage, setBakeStatusMessage] = useState('');
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
 
   const loadVideoQuota = useCallback(async () => {
@@ -222,9 +268,9 @@ function AIStudioContent() {
 
     setIsRendering(true);
     setProgress(0);
+    setBakeStatusMessage('Submitting bake job…');
 
-    // 1. إعداد وتحضير المتغيرات لتتوافق مع خيارات الباكيند الصارمة
-    let backendVoice = "en-US-Male-1"; 
+    let backendVoice = "en-US-Male-1";
     if (selectedVoice === "viral_female") backendVoice = "en-US-Female-1";
     if (selectedVoice === "deep_uk") backendVoice = "en-GB-Male-1";
 
@@ -232,13 +278,12 @@ function AIStudioContent() {
     if (bgMusic === "tiktok_trend_02") backendMusic = "cyberpunk";
     if (bgMusic === "none") backendMusic = "none";
 
-    // 2. تشغيل العداد الوهمي كجزء جمالي من التصميم أثناء معالجة البيانات من السيرفر
+    // Cosmetic progress ticker while the server works
     const progressInterval = setInterval(() => {
-      setProgress((old) => (old >= 90 ? 90 : old + 5));
-    }, 100);
+      setProgress((old) => (old >= 92 ? 92 : old + 2));
+    }, 1200);
 
     try {
-      // 3. إرسال الطلب الفعلي المليء بالتعديلات الحية إلى الباكيند لطبخ الصوت والميكس
       const response = await fetch(getApiUrl('/api/video-studio/bake'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -264,26 +309,62 @@ function AIStudioContent() {
         throw new Error(FREE_TIER_PAYWALL_MESSAGE);
       }
 
-      if (!response.ok) {
+      if (!response.ok && response.status !== 202) {
         const errText = await response.text().catch(() => '');
         throw new Error(errText || `Baking pipeline failed (${response.status})`);
       }
 
-      const result = await response.json();
-      
+      let renderId = '';
+      let finalVideoUrl = '';
+      let marketingCaption = `${getActiveHook(adScript)} ✨`;
+
+      if (response.status === 202) {
+        const accepted = await response.json();
+        renderId = accepted.render_id || accepted.job_id || '';
+        if (!renderId) {
+          throw new Error('Bake accepted but no job id returned from server.');
+        }
+
+        setBakeStatusMessage(
+          accepted.queue_position && accepted.queue_position > 1
+            ? `Queued — position ${accepted.queue_position} on the server`
+            : 'Queued — starting bake shortly…',
+        );
+        setProgress(12);
+
+        const completed = await pollBakeUntilComplete(renderId, (status) => {
+          if (status.status === 'queued') {
+            const pos = status.queue_position;
+            setBakeStatusMessage(
+              pos && pos > 1
+                ? `In queue — position ${pos} (server limits concurrent FFmpeg)`
+                : 'In queue — waiting for an open bake slot…',
+            );
+            setProgress((old) => Math.max(old, 15));
+          } else if (status.status === 'rendering') {
+            setBakeStatusMessage('Rendering voice, mixing audio, and baking video…');
+            setProgress((old) => Math.min(90, old + 4));
+          }
+        });
+
+        finalVideoUrl = completed.final_video_url || '';
+        marketingCaption = completed.marketing_assets?.video_caption || marketingCaption;
+      } else {
+        const result = await response.json();
+        renderId = result.render_id || '';
+        finalVideoUrl = result.final_video_url || (renderId ? resolveBakedVideoUrl(renderId) : '');
+        marketingCaption = result.marketing_assets?.video_caption || marketingCaption;
+      }
+
       clearInterval(progressInterval);
       setProgress(100);
+      setBakeStatusMessage('Bake complete — preparing download…');
 
-      if (result && result.success) {
+      if (finalVideoUrl) {
         await loadVideoQuota();
-        const renderId = result.render_id || '';
-        const videoUrl =
-          result.final_video_url ||
-          (renderId ? resolveBakedVideoUrl(renderId) : '');
-        const marketingCaption = result.marketing_assets?.video_caption || 'Amazing Product! ✨';
 
         try {
-          await downloadVideoFile(videoUrl);
+          await downloadVideoFile(finalVideoUrl);
           scheduleAppSumoJoyPrompt(() => {
             sessionStorage.setItem('droplogic_pending_joy', '1');
           });
@@ -292,8 +373,9 @@ function AIStudioContent() {
         }
 
         setIsRendering(false);
+        setBakeStatusMessage('');
         const params = new URLSearchParams({
-          videoUrl,
+          videoUrl: finalVideoUrl,
           caption: marketingCaption,
           autoDownload: '1',
           joyPrompt: '1',
@@ -301,14 +383,17 @@ function AIStudioContent() {
         if (renderId) params.set('renderId', renderId);
         if (incomingAnalysisId) params.set('analysisId', incomingAnalysisId);
         router.push(`/dashboard/publish?${params.toString()}`);
+      } else {
+        throw new Error('Bake finished but no video URL was returned.');
       }
     } catch (error) {
       console.error("[-] Error during video baking pipeline:", error);
       clearInterval(progressInterval);
       setIsRendering(false);
+      setBakeStatusMessage('');
       const message = error instanceof Error ? error.message : '';
       if (message !== FREE_TIER_PAYWALL_MESSAGE) {
-        alert("Something went wrong while baking the video. Check backend logs.");
+        alert(message || "Something went wrong while baking the video. Check backend logs.");
       }
     }
   };
@@ -541,6 +626,11 @@ function AIStudioContent() {
                   <div className="space-y-3 w-full max-w-[200px] bg-black/50 p-4 rounded-xl backdrop-blur-sm">
                     <div className="text-4xl font-black italic tracking-tighter text-violet-400 animate-pulse">{progress}%</div>
                     <div className="text-[8px] font-mono text-gray-500 uppercase tracking-[0.2em]">Neural Rendering...</div>
+                    {bakeStatusMessage ? (
+                      <p className="text-[9px] font-mono text-zinc-400 text-center leading-relaxed normal-case tracking-normal">
+                        {bakeStatusMessage}
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   incomingTitle && (
@@ -572,7 +662,7 @@ function AIStudioContent() {
           <div className="mt-4 border-t border-white/[0.06] pt-4 w-full">
             <div className="flex items-center justify-between text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-wider mb-2">
               <span>00:00 / 00:15</span>
-              <span>Render Status: {isRendering ? 'Baking Asset...' : 'Idle'}</span>
+              <span>Render Status: {isRendering ? (bakeStatusMessage || 'Baking Asset...') : 'Idle'}</span>
             </div>
             <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden relative border border-white/[0.06]">
               <div className="h-full bg-violet-600 transition-all duration-300 shadow-[0_0_8px_rgba(139,92,246,0.5)]" style={{ width: isRendering ? `${progress}%` : '35%' }}></div>
