@@ -23,7 +23,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function pollAnalysisUntilComplete(taskId: string): Promise<AnalysisPayload | null> {
+async function pollAnalysisUntilComplete(taskId: string): Promise<AnalysisPayload & { error?: string; status?: string }> {
   for (let attempt = 0; attempt < ANALYSIS_POLL_MAX_ATTEMPTS; attempt += 1) {
     const statusRes = await fetch(
       `${ANALYSIS_STATUS_API_URL}/${encodeURIComponent(taskId)}`,
@@ -40,9 +40,24 @@ async function pollAnalysisUntilComplete(taskId: string): Promise<AnalysisPayloa
     }
 
     if (statusJson.status === 'completed' || statusJson.status === 'failed') {
-      const { task_id: _taskId, status: _status, keyword: _keyword, error: _error, ...payload } =
-        statusJson;
-      return payload as AnalysisPayload;
+      const {
+        task_id: _taskId,
+        status,
+        keyword: _keyword,
+        error,
+        ...payload
+      } = statusJson;
+      const result = payload as AnalysisPayload;
+      const assets = result.raw_assets || result.assets || [];
+
+      if (status === 'failed' && assets.length === 0) {
+        throw new Error(
+          error ||
+            'Scraper returned no video assets. Check RAPIDAPI_KEY on the backend droplet and run analysis again.',
+        );
+      }
+
+      return { ...result, error, status };
     }
 
     await sleep(ANALYSIS_POLL_INTERVAL_MS);
@@ -73,6 +88,7 @@ function DashboardContent() {
   const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisData, setAnalysisData] = useState<AnalysisPayload | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<MappedAsset | null>(null);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('query') || 'neck massager');
@@ -80,14 +96,19 @@ function DashboardContent() {
   const currentProductName = analysisData?.product_name || searchQuery;
   const analysisIdCode = analysisData?.analysis_id || '#DL-8892-X';
 
-  const triggerLiveAnalysis = useCallback(async (keywordToSearch: string) => {
+  const triggerLiveAnalysis = useCallback(async (keywordToSearch: string, forceRefresh = false) => {
     if (!keywordToSearch) return;
     setLoading(true);
+    setAnalysisError(null);
     try {
-      const response = await fetch(RUN_ANALYSIS_API_URL, {
+      const analysisUrl = forceRefresh
+        ? `${RUN_ANALYSIS_API_URL}?bypass_cache=true`
+        : RUN_ANALYSIS_API_URL;
+
+      const response = await fetch(analysisUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: keywordToSearch }),
+        body: JSON.stringify({ keyword: keywordToSearch, bypass_cache: forceRefresh }),
         cache: 'no-store',
       });
 
@@ -100,12 +121,23 @@ function DashboardContent() {
           throw new Error('Analysis accepted but no task_id returned from backend');
         }
         const polled = await pollAnalysisUntilComplete(accepted.task_id);
-        if (!polled) return;
         jsonResult = polled;
+        if (polled.error) {
+          setAnalysisError(polled.error);
+        }
       } else if (response.ok) {
         const body = await response.json();
-        const { status: _status, cached: _cached, task_id: _taskId, ...payload } = body;
+        const { status: bodyStatus, cached: _cached, task_id: _taskId, error, ...payload } = body;
         jsonResult = payload as AnalysisPayload;
+        if (error) {
+          setAnalysisError(String(error));
+        }
+        if (bodyStatus === 'failed' && !(jsonResult.raw_assets || jsonResult.assets || []).length) {
+          throw new Error(
+            error ||
+              'Scraper returned no video assets. Check RAPIDAPI_KEY on the backend droplet and run analysis again.',
+          );
+        }
       } else {
         const errBody = await response.text().catch(() => '');
         throw new Error(
@@ -118,11 +150,15 @@ function DashboardContent() {
       const assetsList = jsonResult.raw_assets || jsonResult.assets || [];
       if (assetsList.length > 0) {
         setSelectedVideo(mapAsset(assetsList[0], 0));
+        setActiveTab('video studio');
       } else {
         setSelectedVideo(null);
       }
     } catch (error) {
       console.error('[-] Connection failed to FastAPI Backend:', error);
+      const message =
+        error instanceof Error ? error.message : 'Analysis failed — could not load scraped videos.';
+      setAnalysisError(message);
     } finally {
       setLoading(false);
     }
@@ -196,15 +232,29 @@ function DashboardContent() {
   const rawAssets =
     fetchedAssets.length > 0
       ? fetchedAssets.map(mapAsset)
-      : [
-          {
-            id: 'DL-EMPTY',
-            title: `Scanning live assets for ${currentProductName}...`,
-            duration: '0s',
-            video_url: '',
-            platform: 'System',
-          },
-        ];
+      : analysisError
+        ? [
+            {
+              id: 'DL-EMPTY',
+              title: 'Scraper could not load TikTok videos',
+              duration: '0s',
+              video_url: '',
+              source_video_url: '',
+              platform: 'System',
+            },
+          ]
+        : [
+            {
+              id: 'DL-EMPTY',
+              title: loading
+                ? `Scanning live assets for ${currentProductName}...`
+                : `No raw ads yet for ${currentProductName}`,
+              duration: '0s',
+              video_url: '',
+              source_video_url: '',
+              platform: 'System',
+            },
+          ];
 
   const logicScore = Number(analysisData?.metrics?.logic_score ?? 0);
 
@@ -302,7 +352,7 @@ function DashboardContent() {
               />
               <button
                 type="button"
-                onClick={() => triggerLiveAnalysis(searchQuery)}
+                onClick={() => triggerLiveAnalysis(searchQuery, true)}
                 disabled={loading}
                 className="h-10 bg-violet-600 text-white px-5 rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-violet-500 transition-all disabled:opacity-50 active:scale-[0.97] shadow-[0_0_24px_-8px_rgba(139,92,246,0.8)]"
               >
@@ -438,6 +488,20 @@ function DashboardContent() {
                     Highest-performing raw video assets for this product. Click a card to preview in the
                     focus stream, then launch Studio.
                   </p>
+                  {analysisError && (
+                    <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left">
+                      <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-300">
+                        Scraper error
+                      </p>
+                      <p className="mt-1 text-xs text-amber-100/90 leading-relaxed">{analysisError}</p>
+                      <p className="mt-2 text-[10px] text-amber-200/70">
+                        Raw ads are fetched live from TikTok via RapidAPI on the FastAPI droplet — not from
+                        Supabase. If you see &quot;RAPIDAPI_KEY is not configured&quot;, add it to{' '}
+                        <code className="text-amber-100">backend/.env</code> on the droplet and restart
+                        uvicorn.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {selectedVideo && selectedVideo.video_url && selectedVideo.id !== 'DL-EMPTY' && (

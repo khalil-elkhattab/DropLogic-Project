@@ -1,4 +1,4 @@
-const DEFAULT_BACKEND_ORIGIN = 'http://164.90.235.14:8000';
+const DEFAULT_BACKEND_ORIGIN = 'http://164.90.235.14:8001';
 const DROPLET_IP = '164.90.235.14';
 
 /** Paths we allow media/download proxies to fetch from the backend. */
@@ -26,7 +26,7 @@ function isSafeBackendPath(pathname: string): boolean {
 
 function collectAllowedHosts(): Set<string> {
   const hosts = new Set([
-    `${DROPLET_IP}:8000`,
+    `${DROPLET_IP}:8001`,
     DROPLET_IP,
     'www.droplogicai.com',
     'droplogicai.com',
@@ -45,7 +45,7 @@ function collectAllowedHosts(): Set<string> {
   return hosts;
 }
 
-/** Fix malformed values like `http:/host:8000` or bare `host:8000`. */
+/** Fix malformed values like `http:/host:8001` or bare `host:8001`. */
 export function normalizeBackendUrl(raw: string): string {
   let url = raw.trim();
   if (!url) {
@@ -67,7 +67,6 @@ export function normalizeBackendUrl(raw: string): string {
 export function getBackendUrlSource():
   | 'BACKEND_REWRITE_URL'
   | 'NEXT_SERVER_FASTAPI_URL'
-  | 'NEXT_PUBLIC_BACKEND_URL'
   | 'default' {
   if (process.env.BACKEND_REWRITE_URL?.trim()) {
     return 'BACKEND_REWRITE_URL';
@@ -75,18 +74,17 @@ export function getBackendUrlSource():
   if (process.env.NEXT_SERVER_FASTAPI_URL?.trim()) {
     return 'NEXT_SERVER_FASTAPI_URL';
   }
-  if (process.env.NEXT_PUBLIC_BACKEND_URL?.trim()) {
-    return 'NEXT_PUBLIC_BACKEND_URL';
-  }
   return 'default';
 }
 
-/** Absolute FastAPI origin — for server-side proxy routes and asset URL building. */
+/**
+ * Absolute FastAPI origin for server-side proxy routes (run-analysis, proxy-video, etc.).
+ * Never use NEXT_PUBLIC_BACKEND_URL here — that is the Vercel frontend, not the droplet.
+ */
 export function getBackendUrl(): string {
   const raw =
     process.env.BACKEND_REWRITE_URL ||
     process.env.NEXT_SERVER_FASTAPI_URL ||
-    process.env.NEXT_PUBLIC_BACKEND_URL ||
     DEFAULT_BACKEND_ORIGIN;
   return normalizeBackendUrl(raw);
 }
@@ -133,7 +131,7 @@ export function isAllowedBackendUrl(url: string): boolean {
       return false;
     }
 
-    // Droplet static files are always served over http://164.90.235.14:8000
+    // Droplet static files are always served over http://164.90.235.14:8001
     if (parsed.hostname === DROPLET_IP) {
       return true;
     }

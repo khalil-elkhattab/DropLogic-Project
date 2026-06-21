@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const DEFAULT_BACKEND_ORIGIN = "http://164.90.235.14:8000";
+const DEFAULT_BACKEND_ORIGIN = "http://164.90.235.14:8001";
 
 /**
  * Normalize an external rewrite origin (scheme + host only, no path).
@@ -36,18 +36,16 @@ function normalizeRewriteOrigin(
 
 /**
  * FastAPI droplet origin for paths that still use Next.js rewrites (no Route Handler).
- * Set BACKEND_REWRITE_URL in Vercel → e.g. http://164.90.235.14:8000
+ * Set BACKEND_REWRITE_URL in Vercel → e.g. http://164.90.235.14:8001
  *
  * Analysis uses dedicated Route Handlers (bypasses external rewrite quirks):
  *   - app/api/run-analysis/route.ts
  *   - app/api/analysis-status/[taskId]/route.ts
  */
 const BACKEND_ORIGIN = normalizeRewriteOrigin(
-  process.env.BACKEND_REWRITE_URL ||
-    process.env.NEXT_PUBLIC_BACKEND_URL ||
-    process.env.NEXT_SERVER_FASTAPI_URL,
+  process.env.BACKEND_REWRITE_URL || process.env.NEXT_SERVER_FASTAPI_URL,
   DEFAULT_BACKEND_ORIGIN,
-  { defaultProtocol: "https" },
+  { defaultProtocol: "http" },
 );
 
 /** Bump to force fresh Vercel edge + build cache when debugging routing. */
@@ -69,6 +67,7 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   env: {
+    BACKEND_REWRITE_URL: process.env.BACKEND_REWRITE_URL || DEFAULT_BACKEND_ORIGIN,
     NEXT_PUBLIC_DEPLOY_CACHE_BUST: DEPLOY_CACHE_BUST,
     /** Force DNS mode — overrides stale Vercel NEXT_PUBLIC_CLERK_PROXY_URL at build time. */
     NEXT_PUBLIC_CLERK_PROXY_URL: "",

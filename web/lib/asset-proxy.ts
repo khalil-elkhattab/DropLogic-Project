@@ -1,8 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { decodeProxyUrl } from '@/lib/backend';
 
-/** FastAPI droplet — static MP4s are served here over plain HTTP (no TLS on :8000). */
-export const DROPLET_ASSET_ORIGIN = 'http://164.90.235.14:8000';
+/** FastAPI droplet — static MP4s are served here over plain HTTP (no TLS on :8001). */
+export const DROPLET_ASSET_ORIGIN = 'http://164.90.235.14:8001';
 export const DROPLET_IP = '164.90.235.14';
 
 /** Decode repeatedly until stable (handles double-encoded query params). */
@@ -46,7 +46,7 @@ export function extractAssetUrlParam(request: NextRequest): string {
 
 /**
  * If the string contains our droplet IP and `/static/`, it is valid — period.
- * Returns canonical: http://164.90.235.14:8000/static/...
+ * Returns canonical: http://164.90.235.14:8001/static/...
  */
 export function normalizeDropletAssetUrl(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;

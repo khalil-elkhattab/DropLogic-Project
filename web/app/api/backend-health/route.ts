@@ -51,12 +51,12 @@ export async function GET() {
         latency_ms: Date.now() - started,
         error: error instanceof Error ? error.message : String(error),
         interpretation:
-          'Vercel cannot open a TCP connection to the droplet. This is NOT an Nginx issue if Nginx is not installed — check UFW, DigitalOcean Cloud Firewall, and that uvicorn listens on 0.0.0.0:8000.',
+          'Vercel cannot open a TCP connection to the droplet. This is NOT an Nginx issue if Nginx is not installed — check UFW, DigitalOcean Cloud Firewall, and that uvicorn listens on 0.0.0.0:8001.',
         droplet_checks: [
-          'sudo ss -tlnp | grep 8000   # must show 0.0.0.0:8000',
-          'sudo ufw allow 8000/tcp && sudo ufw status',
-          'curl -v http://127.0.0.1:8000/docs',
-          'curl -v http://164.90.235.14:8000/docs   # from your laptop',
+          'sudo ss -tlnp | grep 8001   # must show 0.0.0.0:8001',
+          'sudo ufw allow 8001/tcp && sudo ufw status',
+          'curl -v http://127.0.0.1:8001/docs',
+          'curl -v http://164.90.235.14:8001/docs   # from your laptop',
         ],
       },
       { status: 502 },

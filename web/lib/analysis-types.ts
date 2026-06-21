@@ -25,6 +25,8 @@ export type AnalysisPayload = {
   audience_phrases?: string[];
   raw_assets?: RawAsset[];
   assets?: RawAsset[];
+  error?: string;
+  status?: string;
 };
 
 export type RawAsset = {

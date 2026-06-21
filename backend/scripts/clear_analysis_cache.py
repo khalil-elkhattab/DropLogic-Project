@@ -9,7 +9,7 @@ import sys
 
 import httpx
 
-DEFAULT_BASE = (os.getenv("SERVER_PUBLIC_URL") or "http://164.90.235.14:8000").rstrip("/")
+DEFAULT_BASE = (os.getenv("SERVER_PUBLIC_URL") or "http://164.90.235.14:8001").rstrip("/")
 
 
 def main() -> int:

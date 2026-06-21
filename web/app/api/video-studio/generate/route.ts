@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     }
 
     // 2. تحديد رابط خادم FastAPI (بايثون) من ملف البيئة أو محلياً كاحتياط
-    const fastapiUrl = process.env.NEXT_SERVER_FASTAPI_URL || 'http://127.0.0.1:8000';
+    const fastapiUrl = process.env.NEXT_SERVER_FASTAPI_URL || 'http://127.0.0.1:8001';
     const targetUrl = `${fastapiUrl}/api/video-studio/generate`;
 
     console.log(`🛰️ [Next.js API Proxy] Forwarding script generation request to Python: ${targetUrl}`);

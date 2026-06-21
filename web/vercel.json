@@ -1,7 +1,8 @@
 {
   "build": {
     "env": {
-      "DEPLOY_CACHE_BUST": "activate-appsumo-edge-bust-v6"
+      "DEPLOY_CACHE_BUST": "backend-port-8001-v1",
+      "BACKEND_REWRITE_URL": "http://164.90.235.14:8001"
     }
   },
   "headers": [

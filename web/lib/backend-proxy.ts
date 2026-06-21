@@ -50,7 +50,7 @@ export async function proxyToBackend(
         backend_url: getBackendUrl(),
         env_source: getBackendUrlSource(),
         hint:
-          'Vercel cannot reach the droplet. Open port 8000 on UFW/DO firewall and ensure uvicorn binds 0.0.0.0:8000.',
+          'Vercel cannot reach the droplet. Open port 8001 on UFW/DO firewall and ensure uvicorn binds 0.0.0.0:8001.',
       },
       { status: 502 },
     );

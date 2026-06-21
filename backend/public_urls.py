@@ -6,7 +6,7 @@ import os
 import re
 from urllib.parse import urlparse
 
-DEFAULT_DROPLET_ORIGIN = "http://164.90.235.14:8000"
+DEFAULT_DROPLET_ORIGIN = "http://164.90.235.14:8001"
 
 # Hosts that serve the Next.js app, not FastAPI /static files.
 FRONTEND_HOST_MARKERS = (

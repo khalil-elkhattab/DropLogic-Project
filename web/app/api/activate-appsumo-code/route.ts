@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { resolveClerkRouteAuth } from '@/lib/clerk-route-auth';
+import { getBackendUrl } from '@/lib/backend';
 
-const BACKEND_URL = 'http://164.90.235.14:8001';
+const BACKEND_URL = getBackendUrl();
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

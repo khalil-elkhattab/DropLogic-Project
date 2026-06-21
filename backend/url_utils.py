@@ -13,7 +13,7 @@ BLOCKED_HOST_FRAGMENTS = (
 
 
 def _backend_public_origin(public_url: str) -> str:
-    origin = (public_url or "http://164.90.235.14:8000").strip().rstrip("/")
+    origin = (public_url or "http://164.90.235.14:8001").strip().rstrip("/")
     if origin.endswith("/api"):
         origin = origin[:-4]
     return origin

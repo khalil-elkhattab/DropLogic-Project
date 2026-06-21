@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy DropLogic backend to DigitalOcean droplet and restart uvicorn on :8000.
+# Deploy DropLogic backend to DigitalOcean droplet and restart uvicorn on :8001.
 # Run from your laptop (with SSH key access), NOT from CI without secrets.
 #
 # Usage:
@@ -14,7 +14,7 @@ DROPLET_HOST="${DROPLET_HOST:-164.90.235.14}"
 DROPLET_USER="${DROPLET_USER:-root}"
 APP_DIR="${APP_DIR:-/root/DropLogic-Project}"
 SUPABASE_URL="${SUPABASE_URL:-https://hlifddtiptsevnueasu.supabase.co}"
-BACKEND_PUBLIC_URL="${BACKEND_PUBLIC_URL:-http://164.90.235.14:8000}"
+BACKEND_PUBLIC_URL="${BACKEND_PUBLIC_URL:-http://164.90.235.14:8001}"
 
 echo "==> Deploying to ${DROPLET_USER}@${DROPLET_HOST}:${APP_DIR}"
 
@@ -47,7 +47,11 @@ else
 fi
 
 echo "==> .env URL lines (secrets redacted):"
-grep -E '^(SUPABASE_URL|BACKEND_PUBLIC_URL|SERVER_PUBLIC_URL)=' .env || true
+grep -E '^(SUPABASE_URL|BACKEND_PUBLIC_URL|SERVER_PUBLIC_URL|RAPIDAPI_KEY)=' .env | sed 's/RAPIDAPI_KEY=.*/RAPIDAPI_KEY=***redacted***/' || true
+
+if ! grep -q '^RAPIDAPI_KEY=.' .env 2>/dev/null; then
+  echo "WARNING: RAPIDAPI_KEY is missing — Raw Ads / TikTok scraper will return zero videos."
+fi
 
 echo "==> Install Python deps (if venv exists)"
 if [ -d venv ]; then
@@ -55,7 +59,7 @@ if [ -d venv ]; then
   pip install -q -r requirements.txt 2>/dev/null || pip install -q httpx fastapi uvicorn python-dotenv groq gtts pedalboard numpy requests 2>/dev/null || true
 fi
 
-echo "==> Restart uvicorn on 0.0.0.0:8000"
+echo "==> Restart uvicorn on 0.0.0.0:8001"
 if systemctl is-active --quiet droplogic 2>/dev/null; then
   sudo systemctl restart droplogic
   sleep 2
@@ -70,13 +74,13 @@ else
   if [ -d venv ]; then
     source venv/bin/activate
   fi
-  nohup uvicorn main:app --host 0.0.0.0 --port 8000 > /var/log/droplogic-uvicorn.log 2>&1 &
+  nohup uvicorn main:app --host 0.0.0.0 --port 8001 > /var/log/droplogic-uvicorn.log 2>&1 &
   sleep 2
   pgrep -af 'uvicorn.*main:app' || { echo "Failed to start uvicorn"; exit 1; }
 fi
 
 echo "==> Health check"
-curl -sf -o /dev/null -w 'docs HTTP %{http_code}\n' http://127.0.0.1:8000/docs
+curl -sf -o /dev/null -w 'docs HTTP %{http_code}\n' http://127.0.0.1:8001/docs
 
 python3 - <<'PY'
 import os, socket

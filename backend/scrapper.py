@@ -5,11 +5,10 @@ import random
 from dotenv import load_dotenv
 
 from media_downloader import coerce_media_url
+from public_urls import backend_public_origin
 from url_utils import normalize_media_url
 
 logger = logging.getLogger("droplogic.scrapper")
-
-DEFAULT_BACKEND_PUBLIC = (os.getenv("SERVER_PUBLIC_URL") or "http://164.90.235.14:8000").rstrip("/")
 
 load_dotenv()
 
@@ -66,7 +65,7 @@ async def fetch_all_platforms_assets(keyword: str):
                     raw_play = item.get("play") or item.get("wmplay") or ""
                     video_url = coerce_media_url(
                         raw_play,
-                        backend_public_url=DEFAULT_BACKEND_PUBLIC,
+                        backend_public_url=backend_public_origin(),
                     )
                     if not video_url:
                         logger.warning("Skipping TikTok item with invalid/blocked play URL: %r", raw_play)
