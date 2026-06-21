@@ -1,6 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isValidAppSumoCodeFormat, normalizeAppSumoCode } from '@/lib/appsumo';
+import {
+  tierActivationMessage,
+  tierFromAppsumoCodesCount,
+} from '@/lib/appsumo-tiers';
 
 const LIFETIME_PLAN_STATUS = 'LTD';
 
@@ -24,32 +28,6 @@ export class AppSumoActivationError extends Error {
     super(message);
     this.name = 'AppSumoActivationError';
   }
-}
-
-function tierFromAppsumoCodesCount(count: number): string {
-  if (count >= 3) return 'appsumo_tier3';
-  if (count === 2) return 'appsumo_tier2';
-  if (count >= 1) return 'appsumo_tier1';
-  return 'free';
-}
-
-function tierActivationMessage(userTier: string, appsumoCodesCount: number): string {
-  if (userTier === 'appsumo_tier3') {
-    return (
-      `AppSumo code activated (${appsumoCodesCount} codes stacked). ` +
-      'You now have unlimited monthly video renders.'
-    );
-  }
-  if (userTier === 'appsumo_tier2') {
-    return (
-      `AppSumo code activated (${appsumoCodesCount} codes stacked). ` +
-      'Your monthly limit is now 300 videos.'
-    );
-  }
-  return (
-    `AppSumo code activated (${appsumoCodesCount} code stacked). ` +
-    'Your monthly limit is now 100 videos.'
-  );
 }
 
 async function getOrCreateProfile(
@@ -163,19 +141,36 @@ async function rollbackRedeem(
   }
 }
 
-async function upgradeUserAppSumoTier(
+async function countRedeemedAppSumoCodes(
+  supabase: SupabaseClient,
+  clerkUserId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('appsumo_codes')
+    .select('*', { count: 'exact', head: true })
+    .eq('used_by_user_id', clerkUserId)
+    .eq('is_used', true);
+
+  if (error) {
+    console.error('[appsumo-activation] code count error:', error.message);
+    throw new AppSumoActivationError('Could not verify your AppSumo stack. Please try again.', 500);
+  }
+
+  return count ?? 0;
+}
+
+async function syncAppSumoStackProfile(
   supabase: SupabaseClient,
   clerkUserId: string,
   email: string | null,
 ) {
-  const profile = await getOrCreateProfile(supabase, clerkUserId, email);
-  const currentCount = Number(profile.appsumo_codes_count ?? 0);
-  const newCount = currentCount + 1;
-  const newTier = tierFromAppsumoCodesCount(newCount);
+  await getOrCreateProfile(supabase, clerkUserId, email);
+  const redeemedCount = await countRedeemedAppSumoCodes(supabase, clerkUserId);
+  const newTier = tierFromAppsumoCodesCount(redeemedCount);
   const updatedAt = new Date().toISOString();
 
   const payload: Record<string, string | number> = {
-    appsumo_codes_count: newCount,
+    appsumo_codes_count: redeemedCount,
     user_tier: newTier,
     plan_status: LIFETIME_PLAN_STATUS,
     updated_at: updatedAt,
@@ -193,22 +188,15 @@ async function upgradeUserAppSumoTier(
     .maybeSingle();
 
   if (updateError) {
-    console.error('[appsumo-activation] profile upgrade error:', updateError.message);
+    console.error('[appsumo-activation] profile sync error:', updateError.message);
     throw new AppSumoActivationError('Could not upgrade your plan. Please try again.', 500);
   }
 
-  const nextProfile = updated ?? {
-    ...profile,
-    appsumo_codes_count: newCount,
-    user_tier: newTier,
-    plan_status: LIFETIME_PLAN_STATUS,
-  };
-
   return {
-    profile: nextProfile,
     userTier: newTier,
-    appsumoCodesCount: newCount,
-    message: tierActivationMessage(newTier, newCount),
+    appsumoCodesCount: redeemedCount,
+    message: tierActivationMessage(newTier, redeemedCount),
+    profile: updated,
   };
 }
 
@@ -246,7 +234,7 @@ export async function activateAppSumoCodeForUser(
   const { redeemedAt } = await redeemAppSumoCode(supabase, code, clerkUserId);
 
   try {
-    const { userTier, appsumoCodesCount, message } = await upgradeUserAppSumoTier(
+    const { userTier, appsumoCodesCount, message } = await syncAppSumoStackProfile(
       supabase,
       clerkUserId,
       email,

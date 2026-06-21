@@ -12,8 +12,8 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from appsumo_tiers import sync_appsumo_stack_profile
 from supabase_env import get_supabase_service_role_key, get_supabase_url, supabase_configured
-from usage_quota import get_or_create_profile, tier_from_appsumo_codes_count
 
 logger = logging.getLogger("droplogic.appsumo")
 
@@ -21,8 +21,6 @@ CODE_PREFIX = "DROPLOGIC-AS-"
 CODE_SUFFIX_LENGTH = 5
 CODE_ALPHABET = string.ascii_uppercase + string.digits
 CODE_PATTERN = re.compile(rf"^{re.escape(CODE_PREFIX)}[A-Z0-9]{{{CODE_SUFFIX_LENGTH}}}$")
-
-LIFETIME_PLAN_STATUS = "LTD"
 
 
 class AppSumoServiceError(Exception):
@@ -178,77 +176,20 @@ async def redeem_appsumo_code(code: str, clerk_user_id: str) -> dict[str, Any]:
     raise AppSumoServiceError(f"Code {code!r} could not be redeemed")
 
 
-def _tier_activation_message(user_tier: str, appsumo_codes_count: int) -> str:
-    if user_tier == "appsumo_tier3":
-        return (
-            f"AppSumo code activated ({appsumo_codes_count} codes stacked). "
-            "You now have unlimited monthly video renders."
-        )
-    if user_tier == "appsumo_tier2":
-        return (
-            f"AppSumo code activated ({appsumo_codes_count} codes stacked). "
-            "Your monthly limit is now 300 videos."
-        )
-    return (
-        f"AppSumo code activated ({appsumo_codes_count} code stacked). "
-        "Your monthly limit is now 100 videos."
-    )
-
-
 async def upgrade_user_appsumo_tier(clerk_user_id: str, email: str | None) -> dict[str, Any]:
     """
-    Increment appsumo_codes_count and set user_tier:
-      1 code  -> appsumo_tier1 (100/mo)
-      2 codes -> appsumo_tier2 (300/mo)
-      3+ codes -> appsumo_tier3 (unlimited)
+    Recompute stack from redeemed appsumo_codes rows and set user_tier:
+      1 code  -> appsumo_tier1 (30/mo)
+      2 codes -> appsumo_tier2 (100/mo)
+      3+ codes -> appsumo_tier3 (600/mo hard cap)
     """
     if not supabase_configured():
         raise AppSumoNotConfiguredError("Supabase is not configured")
 
-    profile = await get_or_create_profile(clerk_user_id, email)
-    current_count = int(profile.get("appsumo_codes_count") or 0)
-    new_count = current_count + 1
-    new_tier = tier_from_appsumo_codes_count(new_count)
-
-    updated_at = datetime.now(timezone.utc).isoformat()
-    url = (
-        f"{get_supabase_url()}/rest/v1/profiles"
-        f"?clerk_user_id=eq.{quote(clerk_user_id, safe='')}"
-    )
-    payload: dict[str, Any] = {
-        "appsumo_codes_count": new_count,
-        "user_tier": new_tier,
-        "plan_status": LIFETIME_PLAN_STATUS,
-        "updated_at": updated_at,
-    }
-    if email:
-        payload["email"] = email
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.patch(
-            url,
-            headers=_supabase_headers(prefer="return=representation"),
-            json=payload,
-        )
-        if response.status_code not in (200, 204):
-            raise AppSumoServiceError(
-                f"Supabase profile upgrade failed ({response.status_code}): {response.text[:300]}"
-            )
-        rows = response.json() if response.content else []
-
-    if rows:
-        profile = rows[0]
-    else:
-        profile = await get_or_create_profile(clerk_user_id, email)
-        profile = {
-            **profile,
-            "appsumo_codes_count": new_count,
-            "user_tier": new_tier,
-            "plan_status": LIFETIME_PLAN_STATUS,
-        }
-
-    profile["activation_message"] = _tier_activation_message(new_tier, new_count)
-    return profile
+    try:
+        return await sync_appsumo_stack_profile(clerk_user_id, email)
+    except RuntimeError as exc:
+        raise AppSumoServiceError(str(exc)) from exc
 
 
 # Backward-compatible alias for imports that still reference the old name.

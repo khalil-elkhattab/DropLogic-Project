@@ -12,6 +12,12 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from appsumo_tiers import (
+    UNLIMITED_LIMIT,
+    USER_TIERS,
+    monthly_video_limit_for_tier,
+    tier_from_appsumo_codes_count,
+)
 from supabase_env import (
     get_supabase_service_role_key,
     get_supabase_url,
@@ -20,19 +26,6 @@ from supabase_env import (
 
 FREE_LIFETIME_LIMIT = int(os.getenv("FREE_TIER_VIDEO_LIMIT", "5"))
 PREMIUM_MONTHLY_LIMIT = int(os.getenv("PREMIUM_MONTHLY_VIDEO_LIMIT", "200"))
-APPSUMO_TIER1_MONTHLY_LIMIT = int(os.getenv("APPSUMO_TIER1_MONTHLY_VIDEO_LIMIT", "100"))
-APPSUMO_TIER2_MONTHLY_LIMIT = int(os.getenv("APPSUMO_TIER2_MONTHLY_VIDEO_LIMIT", "300"))
-
-# Sentinel: tier3 bypasses all limit checks.
-UNLIMITED_LIMIT = -1
-
-USER_TIERS = frozenset({
-    "free",
-    "premium",
-    "appsumo_tier1",
-    "appsumo_tier2",
-    "appsumo_tier3",
-})
 
 # Dev fallback when Supabase is not configured
 _LOCAL_USAGE: dict[str, list[float]] = {}
@@ -81,16 +74,6 @@ def _normalize_plan(plan_status: str | None) -> str:
     return (plan_status or "free").strip().lower()
 
 
-def tier_from_appsumo_codes_count(count: int) -> str:
-    if count >= 3:
-        return "appsumo_tier3"
-    if count == 2:
-        return "appsumo_tier2"
-    if count >= 1:
-        return "appsumo_tier1"
-    return "free"
-
-
 def resolve_user_tier(profile: dict[str, Any]) -> str:
     tier = (profile.get("user_tier") or "").strip().lower()
     if tier in USER_TIERS:
@@ -110,14 +93,10 @@ def resolve_user_tier(profile: dict[str, Any]) -> str:
 def _limits_for_profile(profile: dict[str, Any]) -> tuple[int, str]:
     tier = resolve_user_tier(profile)
 
-    if tier == "appsumo_tier3":
-        return UNLIMITED_LIMIT, "unlimited"
+    if tier in ("appsumo_tier1", "appsumo_tier2", "appsumo_tier3"):
+        return monthly_video_limit_for_tier(tier)
     if tier == "free":
         return FREE_LIFETIME_LIMIT, "lifetime"
-    if tier == "appsumo_tier1":
-        return APPSUMO_TIER1_MONTHLY_LIMIT, "monthly"
-    if tier == "appsumo_tier2":
-        return APPSUMO_TIER2_MONTHLY_LIMIT, "monthly"
     if tier == "premium":
         return PREMIUM_MONTHLY_LIMIT, "monthly"
     return FREE_LIFETIME_LIMIT, "lifetime"
@@ -269,8 +248,10 @@ def _quota_message(
     used: int,
     remaining: int,
 ) -> str:
-    if user_tier == "appsumo_tier3":
+    if user_tier == "appsumo_tier3" and limit == UNLIMITED_LIMIT:
         return "Unlimited video renders on your AppSumo Tier 3 plan."
+    if user_tier == "appsumo_tier3":
+        return f"{remaining} video render(s) remaining on your AppSumo Tier 3 plan this month."
 
     if not allowed:
         if user_tier == "free":
