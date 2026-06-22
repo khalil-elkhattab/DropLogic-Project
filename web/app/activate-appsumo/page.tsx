@@ -50,11 +50,13 @@ export default function ActivateAppSumoPage() {
       <main className="flex-1 max-w-lg w-full mx-auto px-6 py-12 relative z-10 flex flex-col items-center justify-center">
         <div className="text-center mb-8 space-y-3">
           <span className="text-[9px] font-mono font-bold text-violet-400 uppercase tracking-widest block">
-            // AppSumo Lifetime Activation
+            // AppSumo License Redemption
           </span>
           <h1 className="dl-section-title uppercase">Redeem Your Code</h1>
           <p className="text-zinc-500 text-xs font-medium max-w-md mx-auto leading-relaxed">
-            Unlock DropLogic Lifetime Access with your AppSumo purchase code. One code per account.
+            Purchased on AppSumo? Redeem your license key here for{' '}
+            <span className="text-amber-200 font-bold">LTD_AppSumo</span> — stack up to 3 codes for
+            higher tiers.
           </p>
         </div>
 

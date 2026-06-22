@@ -1,7 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { LemonSqueezyWebhookEvent } from './types';
+import { PLAN_STATUS } from '@/lib/plan-status';
 
-type ProfilePlan = 'free' | 'pro' | 'LTD' | 'credits';
+type ProfilePlan =
+  | 'free'
+  | 'pro'
+  | 'Pro_Monthly'
+  | 'LTD'
+  | 'LTD_Direct'
+  | 'LTD_AppSumo'
+  | 'credits';
 
 type UserTier =
   | 'free'
@@ -11,7 +19,14 @@ type UserTier =
   | 'appsumo_tier3';
 
 function resolveUserTierForPlan(planStatus: ProfilePlan): UserTier {
-  if (planStatus === 'pro' || planStatus === 'credits' || planStatus === 'LTD') {
+  const normalized = planStatus.toLowerCase();
+  if (
+    normalized === 'pro' ||
+    normalized === 'pro_monthly' ||
+    normalized === 'credits' ||
+    normalized === 'ltd' ||
+    normalized === 'ltd_direct'
+  ) {
     return 'premium';
   }
   return 'free';
@@ -99,8 +114,11 @@ export async function syncProfilePlan(
 
   if (input.planStatus === 'free') {
     const existingTier = (existing?.user_tier || '').toLowerCase();
+    const existingPlan = (existing?.plan_status || '').toLowerCase();
     if (
-      existing?.plan_status === 'LTD' ||
+      existingPlan === 'ltd_appsumo' ||
+      existingPlan === 'ltd_direct' ||
+      existingPlan === 'ltd' ||
       existingTier.startsWith('appsumo_')
     ) {
       return;

@@ -11,6 +11,7 @@ import {
   syncProfilePlan,
 } from '@/lib/lemonsqueezy/profile-sync';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { PLAN_STATUS } from '@/lib/plan-status';
 
 export const runtime = 'nodejs';
 
@@ -67,11 +68,16 @@ async function handleOrderCreated(event: LemonSqueezyWebhookEvent) {
   await syncProfilePlan(supabase, {
     email,
     clerkUserId,
-    planStatus: 'LTD',
+    planStatus: PLAN_STATUS.LTD_DIRECT,
     orderId: event.data.id,
   });
 
-  return NextResponse.json({ received: true, updated: true, email, plan_status: 'LTD' });
+  return NextResponse.json({
+    received: true,
+    updated: true,
+    email,
+    plan_status: PLAN_STATUS.LTD_DIRECT,
+  });
 }
 
 async function handleSubscriptionEvent(event: LemonSqueezyWebhookEvent) {
@@ -101,14 +107,14 @@ async function handleSubscriptionEvent(event: LemonSqueezyWebhookEvent) {
   }
 
   const eventName = event.meta.event_name;
-  let planStatus: 'pro' | 'free' = 'free';
+  let planStatus: 'Pro_Monthly' | 'free' = PLAN_STATUS.FREE;
 
   if (eventName === 'subscription_cancelled') {
-    planStatus = 'free';
+    planStatus = PLAN_STATUS.FREE;
   } else if (isActiveSubscriptionStatus(attrs.status)) {
-    planStatus = 'pro';
+    planStatus = PLAN_STATUS.PRO_MONTHLY;
   } else {
-    planStatus = 'free';
+    planStatus = PLAN_STATUS.FREE;
   }
 
   await syncProfilePlan(supabase, {

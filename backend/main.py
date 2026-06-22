@@ -189,8 +189,9 @@ class VideoBakeRequest(BaseModel):
     watermark_attached: bool  
     logo_url: Optional[str] = None 
     
-    video_duration: Optional[float] = 15.0        
-    video_scale: Optional[float] = 0.9            
+    video_duration: Optional[float] = 15.0
+    # Zoom multiplier for anti-ban FFmpeg path (1.01–1.05); legacy 0.9 cloud value is ignored.
+    video_scale: Optional[float] = 1.02
     camera_effect: Optional[str] = "zoomIn"       
     bg_camera_effect: Optional[str] = "zoomInSlow" 
     audio_volume: Optional[float] = 1.0

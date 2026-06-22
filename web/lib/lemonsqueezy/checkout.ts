@@ -16,7 +16,7 @@ function appendCheckoutParams(url: URL, options?: CheckoutOptions): string {
 }
 
 export function getLtdCheckoutUrl(options?: CheckoutOptions): string | null {
-  const baseUrl = process.env.NEXT_PUBLIC_LEMONSQUEEZY_LTD_CHECKOUT_URL;
+  const baseUrl = process.env.NEXT_PUBLIC_LEMONSQUEEZY_LTD_CHECKOUT_URL?.trim();
   if (!baseUrl) {
     return null;
   }
@@ -25,10 +25,18 @@ export function getLtdCheckoutUrl(options?: CheckoutOptions): string | null {
 }
 
 export function getProCheckoutUrl(options?: CheckoutOptions): string | null {
-  const baseUrl = process.env.NEXT_PUBLIC_LEMONSQUEEZY_PRO_CHECKOUT_URL;
+  const baseUrl = process.env.NEXT_PUBLIC_LEMONSQUEEZY_PRO_CHECKOUT_URL?.trim();
   if (!baseUrl) {
     return null;
   }
 
   return appendCheckoutParams(new URL(baseUrl), options);
+}
+
+export function isProCheckoutConfigured(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_LEMONSQUEEZY_PRO_CHECKOUT_URL?.trim());
+}
+
+export function isLtdCheckoutConfigured(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_LEMONSQUEEZY_LTD_CHECKOUT_URL?.trim());
 }

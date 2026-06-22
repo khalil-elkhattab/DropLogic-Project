@@ -30,10 +30,10 @@ export function getAppSumoDealUrl(): string | null {
   return url || null;
 }
 
-export async function activateAppSumoCode(code: string): Promise<AppSumoActivateResponse> {
+export async function redeemAppSumoCode(code: string): Promise<AppSumoActivateResponse> {
   const normalized = normalizeAppSumoCode(code);
 
-  const response = await fetch('/api/activate-appsumo-code', {
+  const response = await fetch('/api/redeem-appsumo', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code: normalized }),
@@ -49,14 +49,19 @@ export async function activateAppSumoCode(code: string): Promise<AppSumoActivate
       (payload as AppSumoActivateErrorBody).detail ||
       (payload as AppSumoActivateErrorBody).error ||
       (response.status === 502
-        ? 'Activation service is unreachable. Please try again in a moment.'
+        ? 'Redemption service is unreachable. Please try again in a moment.'
         : response.status === 503
-          ? 'Activation is temporarily unavailable. Please try again later.'
-          : 'Could not activate this AppSumo code. Please try again.');
+          ? 'Redemption is temporarily unavailable. Please try again later.'
+          : 'Could not redeem this AppSumo code. Please try again.');
     throw new Error(message);
   }
 
   return payload as AppSumoActivateResponse;
+}
+
+/** @deprecated Use redeemAppSumoCode — kept for backward compatibility */
+export async function activateAppSumoCode(code: string): Promise<AppSumoActivateResponse> {
+  return redeemAppSumoCode(code);
 }
 
 export function mapAppSumoErrorMessage(error: unknown): string {

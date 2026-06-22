@@ -6,7 +6,7 @@ import {
   tierFromAppsumoCodesCount,
 } from '@/lib/appsumo-tiers';
 
-const LIFETIME_PLAN_STATUS = 'LTD';
+const LIFETIME_PLAN_STATUS = 'LTD_AppSumo';
 
 export type AppSumoActivationResult = {
   success: true;
@@ -244,7 +244,7 @@ export async function activateAppSumoCodeForUser(
       success: true,
       message,
       code,
-      plan_status: LIFETIME_PLAN_STATUS.toLowerCase(),
+      plan_status: LIFETIME_PLAN_STATUS,
       user_tier: userTier,
       appsumo_codes_count: appsumoCodesCount,
       lifetime_plan: true,

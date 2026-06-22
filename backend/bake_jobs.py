@@ -204,6 +204,7 @@ async def _execute_bake_pipeline(
                 audio_path=final_audio_path,
                 output_path=output_video_path,
                 anti_ban_filter=request.anti_ban_filter,
+                video_scale=request.video_scale,
                 subtitle_path=ass_path,
             )
         except FFmpegBakeError as ffmpeg_err:

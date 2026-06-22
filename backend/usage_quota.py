@@ -26,6 +26,8 @@ from supabase_env import (
 
 FREE_LIFETIME_LIMIT = int(os.getenv("FREE_TIER_VIDEO_LIMIT", "5"))
 PREMIUM_MONTHLY_LIMIT = int(os.getenv("PREMIUM_MONTHLY_VIDEO_LIMIT", "200"))
+PRO_MONTHLY_VIDEO_LIMIT = int(os.getenv("PRO_MONTHLY_VIDEO_LIMIT", "50"))
+LTD_DIRECT_MONTHLY_VIDEO_LIMIT = int(os.getenv("LTD_DIRECT_MONTHLY_VIDEO_LIMIT", "50"))
 
 # Dev fallback when Supabase is not configured
 _LOCAL_USAGE: dict[str, list[float]] = {}
@@ -81,22 +83,27 @@ def resolve_user_tier(profile: dict[str, Any]) -> str:
 
     plan = _normalize_plan(profile.get("plan_status"))
     appsumo_count = int(profile.get("appsumo_codes_count") or 0)
-    if appsumo_count > 0:
+    if appsumo_count > 0 or plan == "ltd_appsumo":
         return tier_from_appsumo_codes_count(appsumo_count)
-    if plan in {"pro", "credits"}:
+    if plan in {"pro", "pro_monthly", "credits"}:
         return "premium"
-    if plan == "ltd":
-        return "appsumo_tier1"
+    if plan in {"ltd", "ltd_direct"}:
+        return "premium"
     return "free"
 
 
 def _limits_for_profile(profile: dict[str, Any]) -> tuple[int, str]:
     tier = resolve_user_tier(profile)
+    plan = _normalize_plan(profile.get("plan_status"))
 
     if tier in ("appsumo_tier1", "appsumo_tier2", "appsumo_tier3"):
         return monthly_video_limit_for_tier(tier)
-    if tier == "free":
+    if tier == "free" and plan in {"", "free"}:
         return FREE_LIFETIME_LIMIT, "lifetime"
+    if plan in {"pro_monthly", "pro"}:
+        return PRO_MONTHLY_VIDEO_LIMIT, "monthly"
+    if plan in {"ltd_direct", "ltd"}:
+        return LTD_DIRECT_MONTHLY_VIDEO_LIMIT, "monthly"
     if tier == "premium":
         return PREMIUM_MONTHLY_LIMIT, "monthly"
     return FREE_LIFETIME_LIMIT, "lifetime"

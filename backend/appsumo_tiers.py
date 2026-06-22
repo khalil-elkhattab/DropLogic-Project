@@ -19,7 +19,7 @@ APPSUMO_TIER3_MONTHLY_LIMIT = int(_tier3_raw) if _tier3_raw.lstrip("-").isdigit(
 
 UNLIMITED_LIMIT = -1
 MAX_STACKED_CODES_FOR_TIER = 3
-LIFETIME_PLAN_STATUS = "LTD"
+LIFETIME_PLAN_STATUS = "LTD_AppSumo"
 
 USER_TIERS = frozenset({
     "free",

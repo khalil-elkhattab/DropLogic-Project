@@ -297,6 +297,7 @@ function AIStudioContent() {
           selected_bg_music: backendMusic,
           watermark_attached: !!logoImage,
           video_duration: 10.0,
+          video_scale: antiBanFilter ? 1.02 : undefined,
           anti_ban_filter: antiBanFilter,
           burn_captions: burnCaptions,
           clerk_user_id: user?.id ?? null,
@@ -755,7 +756,8 @@ function AIStudioContent() {
                   Uniquify video for TikTok
                 </p>
                 <p className="text-[10px] text-zinc-400 leading-relaxed mt-1">
-                  Mirrors, micro-speed shifts, and color grading to bypass duplicate-content detection.
+                  Mirror, 1–3% zoom, micro-speed, color grade, audio pitch/tempo shift, and unique
+                  smartphone metadata on every export.
                 </p>
               </div>
               <button
@@ -777,7 +779,7 @@ function AIStudioContent() {
             </div>
             {antiBanFilter && (
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {['hflip', 'setpts 1.03', 'atempo 0.97', 'color grade'].map((tag) => (
+                {['hflip', 'zoom 1–3%', 'setpts', 'eq grade', 'atempo', 'metadata'].map((tag) => (
                   <span
                     key={tag}
                     className="text-[8px] font-mono font-bold uppercase tracking-wider text-violet-200 bg-white/[0.06] border border-violet-500/30 px-2 py-0.5 rounded"
