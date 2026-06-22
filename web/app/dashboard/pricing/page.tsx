@@ -34,9 +34,9 @@ const proPlan = {
   price: '$19',
   period: '/ month',
   description:
-    'Everything you need to scale dropshipping ads — HD renders per month, advanced product intelligence, and priority queue.',
+    'Everything you need to scale dropshipping ads — 50 HD renders per month, advanced product intelligence, and priority queue.',
   features: [
-    '200 HD video renders per month',
+    '50 HD video renders per month',
     'Advanced product intelligence reports',
     'AI script & hashtag generation',
     'Priority render queue',
@@ -49,9 +49,10 @@ const ltdPlan = {
   name: 'Lifetime Direct',
   price: '$49',
   period: '/ one-time',
-  description: 'Buy once on our site via Lemon Squeezy. Premium lifetime access — no AppSumo code required.',
+  description:
+    'Buy once on our site via Lemon Squeezy. Lifetime platform access with 50 HD renders per month — no AppSumo code required.',
   features: [
-    'Premium lifetime access',
+    '50 HD video renders per month (Lifetime Access)',
     'Unlimited product logic analysis',
     'HD video rendering — no watermarks',
     'AI script & hashtag generation',
