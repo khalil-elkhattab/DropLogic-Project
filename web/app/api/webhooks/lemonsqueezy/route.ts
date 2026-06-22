@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyLemonSqueezyWebhook } from '@/lib/lemonsqueezy/verify-webhook';
 import type { LemonSqueezyWebhookEvent } from '@/lib/lemonsqueezy/types';
-import { SUBSCRIPTION_EVENTS } from '@/lib/lemonsqueezy/types';
+import {
+  ORDER_EVENTS,
+  SUBSCRIPTION_EVENTS,
+  SUBSCRIPTION_INVOICE_EVENTS,
+} from '@/lib/lemonsqueezy/types';
 import {
   buildWebhookEventId,
+  hasWebhookBeenProcessed,
   isActiveSubscriptionStatus,
+  isLtdProduct,
   isProSubscriptionProduct,
   markWebhookProcessed,
   resolveWebhookIdentity,
@@ -15,77 +21,100 @@ import { PLAN_STATUS } from '@/lib/plan-status';
 
 export const runtime = 'nodejs';
 
-function isLtdPurchase(event: LemonSqueezyWebhookEvent): boolean {
-  const ltdProductId = process.env.LEMONSQUEEZY_LTD_PRODUCT_ID;
-  const ltdVariantId = process.env.LEMONSQUEEZY_LTD_VARIANT_ID;
+type PlanStatusTarget = typeof PLAN_STATUS.PRO_MONTHLY | typeof PLAN_STATUS.LTD_DIRECT;
 
-  if (!ltdProductId && !ltdVariantId) {
-    console.warn(
-      '[LemonSqueezy] LEMONSQUEEZY_LTD_PRODUCT_ID / LEMONSQUEEZY_LTD_VARIANT_ID not set — granting LTD on every paid order',
-    );
-    return true;
-  }
-
+function getOrderItemProductIds(event: LemonSqueezyWebhookEvent) {
   const item = event.data.attributes.first_order_item;
   if (!item) {
-    return false;
+    return null;
   }
-
-  if (ltdVariantId && item.variant_id.toString() === ltdVariantId) {
-    return true;
-  }
-
-  if (ltdProductId && item.product_id.toString() === ltdProductId) {
-    return true;
-  }
-
-  return false;
+  return {
+    productId: item.product_id,
+    variantId: item.variant_id,
+  };
 }
 
-async function handleOrderCreated(event: LemonSqueezyWebhookEvent) {
-  if (!isLtdPurchase(event)) {
-    return NextResponse.json({ received: true, skipped: 'not_ltd_product' });
+function resolvePaidOrderPlan(event: LemonSqueezyWebhookEvent): PlanStatusTarget | null {
+  const ids = getOrderItemProductIds(event);
+  if (!ids) {
+    return null;
   }
 
-  const orderStatus = event.data.attributes.status;
-  if (orderStatus && orderStatus !== 'paid') {
-    return NextResponse.json({ received: true, skipped: 'order_not_paid' });
+  if (isLtdProduct(ids.productId, ids.variantId)) {
+    return PLAN_STATUS.LTD_DIRECT;
   }
 
+  if (isProSubscriptionProduct(ids.productId, ids.variantId)) {
+    return PLAN_STATUS.PRO_MONTHLY;
+  }
+
+  return null;
+}
+
+async function applyPlanUpdate(
+  event: LemonSqueezyWebhookEvent,
+  planStatus: PlanStatusTarget | typeof PLAN_STATUS.FREE,
+  options: { subscriptionId?: string; orderId?: string } = {},
+) {
   const { email, clerkUserId } = resolveWebhookIdentity(event);
+  if (!email && !clerkUserId) {
+    return NextResponse.json(
+      { error: 'Missing customer email and clerk_user_id' },
+      { status: 422 },
+    );
+  }
+
   if (!email) {
     return NextResponse.json({ error: 'Missing customer email' }, { status: 422 });
   }
 
   const supabase = createAdminClient();
   const eventId = buildWebhookEventId(event);
-  const isNew = await markWebhookProcessed(supabase, eventId, event.meta.event_name);
 
-  if (!isNew) {
+  if (await hasWebhookBeenProcessed(supabase, eventId)) {
     return NextResponse.json({ received: true, updated: false, reason: 'already_processed' });
   }
 
   await syncProfilePlan(supabase, {
     email,
     clerkUserId,
-    planStatus: PLAN_STATUS.LTD_DIRECT,
-    orderId: event.data.id,
+    planStatus,
+    subscriptionId: options.subscriptionId,
+    orderId: options.orderId,
   });
+
+  await markWebhookProcessed(supabase, eventId, event.meta.event_name);
 
   return NextResponse.json({
     received: true,
     updated: true,
     email,
-    plan_status: PLAN_STATUS.LTD_DIRECT,
+    clerk_user_id: clerkUserId,
+    plan_status: planStatus,
+    event: event.meta.event_name,
   });
 }
 
-async function handleSubscriptionEvent(event: LemonSqueezyWebhookEvent) {
-  const { email, clerkUserId } = resolveWebhookIdentity(event);
-  if (!email) {
-    return NextResponse.json({ error: 'Missing customer email' }, { status: 422 });
+async function handleOrderCreated(event: LemonSqueezyWebhookEvent) {
+  const orderStatus = event.data.attributes.status;
+  if (orderStatus && orderStatus !== 'paid') {
+    return NextResponse.json({ received: true, skipped: 'order_not_paid' });
   }
 
+  const planStatus = resolvePaidOrderPlan(event);
+  if (!planStatus) {
+    const ids = getOrderItemProductIds(event);
+    console.warn('[LemonSqueezy] order_created skipped — product not configured', {
+      product_id: ids?.productId ?? null,
+      variant_id: ids?.variantId ?? null,
+    });
+    return NextResponse.json({ received: true, skipped: 'unrecognized_product' });
+  }
+
+  return applyPlanUpdate(event, planStatus, { orderId: event.data.id });
+}
+
+async function handleSubscriptionEvent(event: LemonSqueezyWebhookEvent) {
   const attrs = event.data.attributes;
   const productId = attrs.product_id;
   const variantId = attrs.variant_id;
@@ -95,21 +124,18 @@ async function handleSubscriptionEvent(event: LemonSqueezyWebhookEvent) {
   }
 
   if (!isProSubscriptionProduct(productId, variantId)) {
+    console.warn('[LemonSqueezy] subscription event skipped — not pro product', {
+      event: event.meta.event_name,
+      product_id: productId,
+      variant_id: variantId,
+    });
     return NextResponse.json({ received: true, skipped: 'not_pro_product' });
   }
 
-  const supabase = createAdminClient();
-  const eventId = buildWebhookEventId(event);
-  const isNew = await markWebhookProcessed(supabase, eventId, event.meta.event_name);
-
-  if (!isNew) {
-    return NextResponse.json({ received: true, updated: false, reason: 'already_processed' });
-  }
-
   const eventName = event.meta.event_name;
-  let planStatus: 'Pro_Monthly' | 'free' = PLAN_STATUS.FREE;
+  let planStatus: typeof PLAN_STATUS.PRO_MONTHLY | typeof PLAN_STATUS.FREE = PLAN_STATUS.FREE;
 
-  if (eventName === 'subscription_cancelled') {
+  if (eventName === 'subscription_cancelled' || eventName === 'subscription_expired') {
     planStatus = PLAN_STATUS.FREE;
   } else if (isActiveSubscriptionStatus(attrs.status)) {
     planStatus = PLAN_STATUS.PRO_MONTHLY;
@@ -117,20 +143,72 @@ async function handleSubscriptionEvent(event: LemonSqueezyWebhookEvent) {
     planStatus = PLAN_STATUS.FREE;
   }
 
-  await syncProfilePlan(supabase, {
-    email,
-    clerkUserId,
-    planStatus,
-    subscriptionId: event.data.id,
-  });
+  return applyPlanUpdate(event, planStatus, { subscriptionId: event.data.id });
+}
 
-  return NextResponse.json({
-    received: true,
-    updated: true,
-    email,
-    clerk_user_id: clerkUserId,
-    plan_status: planStatus,
-    subscription_status: attrs.status,
+async function handleSubscriptionInvoiceEvent(event: LemonSqueezyWebhookEvent) {
+  const attrs = event.data.attributes;
+  const invoiceStatus = attrs.status;
+  const billingReason = attrs.billing_reason;
+
+  if (invoiceStatus && invoiceStatus !== 'paid') {
+    return NextResponse.json({ received: true, skipped: 'invoice_not_paid' });
+  }
+
+  if (billingReason && billingReason !== 'initial' && billingReason !== 'renewal') {
+    return NextResponse.json({ received: true, skipped: 'invoice_billing_reason' });
+  }
+
+  const subscriptionId = attrs.subscription_id;
+  if (!subscriptionId) {
+    return NextResponse.json({ error: 'Missing subscription_id on invoice' }, { status: 422 });
+  }
+
+  const { email, clerkUserId } = resolveWebhookIdentity(event);
+  if (!email) {
+    return NextResponse.json({ error: 'Missing customer email' }, { status: 422 });
+  }
+
+  const supabase = createAdminClient();
+
+  if (clerkUserId) {
+    const existing = await supabase
+      .from('profiles')
+      .select('id, plan_status')
+      .eq('clerk_user_id', clerkUserId)
+      .maybeSingle();
+
+    if (existing.error) {
+      throw existing.error;
+    }
+
+    if (existing.data) {
+      return applyPlanUpdate(event, PLAN_STATUS.PRO_MONTHLY, {
+        subscriptionId: String(subscriptionId),
+      });
+    }
+  }
+
+  const bySubscription = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('lemon_squeezy_subscription_id', String(subscriptionId))
+    .maybeSingle();
+
+  if (bySubscription.error) {
+    throw bySubscription.error;
+  }
+
+  if (!bySubscription.data) {
+    console.warn('[LemonSqueezy] subscription invoice skipped — no linked profile', {
+      subscription_id: subscriptionId,
+      email,
+    });
+    return NextResponse.json({ received: true, skipped: 'profile_not_linked' });
+  }
+
+  return applyPlanUpdate(event, PLAN_STATUS.PRO_MONTHLY, {
+    subscriptionId: String(subscriptionId),
   });
 }
 
@@ -144,6 +222,7 @@ export async function POST(request: NextRequest) {
   const signature = request.headers.get('X-Signature');
 
   if (!verifyLemonSqueezyWebhook(rawBody, signature, secret)) {
+    console.warn('[LemonSqueezy] Invalid webhook signature');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
@@ -157,12 +236,16 @@ export async function POST(request: NextRequest) {
   const eventName = event.meta.event_name;
 
   try {
-    if (eventName === 'order_created') {
+    if ((ORDER_EVENTS as readonly string[]).includes(eventName)) {
       return await handleOrderCreated(event);
     }
 
     if ((SUBSCRIPTION_EVENTS as readonly string[]).includes(eventName)) {
       return await handleSubscriptionEvent(event);
+    }
+
+    if ((SUBSCRIPTION_INVOICE_EVENTS as readonly string[]).includes(eventName)) {
+      return await handleSubscriptionInvoiceEvent(event);
     }
 
     return NextResponse.json({ received: true, skipped: 'unsupported_event' });

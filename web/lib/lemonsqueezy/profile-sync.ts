@@ -2,6 +2,60 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { LemonSqueezyWebhookEvent } from './types';
 import { PLAN_STATUS } from '@/lib/plan-status';
 
+function coerceCustomDataString(value: unknown): string | null {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return null;
+}
+
+function normalizeLemonEnvId(raw: string | undefined): string | null {
+  const cleaned = (raw ?? '').trim();
+  return cleaned || null;
+}
+
+function normalizeLemonResourceId(value: number | string | null | undefined): string | null {
+  if (value == null) {
+    return null;
+  }
+  const cleaned = String(value).trim();
+  return cleaned || null;
+}
+
+export function matchesLemonProduct(
+  productId: number | string | null | undefined,
+  variantId: number | string | null | undefined,
+  configuredProductId: string | undefined,
+  configuredVariantId: string | undefined,
+): boolean {
+  const envProductId = normalizeLemonEnvId(configuredProductId);
+  const envVariantId = normalizeLemonEnvId(configuredVariantId);
+
+  if (!envProductId && !envVariantId) {
+    return true;
+  }
+
+  const actualProductId = normalizeLemonResourceId(productId);
+  const actualVariantId = normalizeLemonResourceId(variantId);
+
+  if (envVariantId && actualVariantId === envVariantId) {
+    return true;
+  }
+
+  if (envProductId && actualProductId === envProductId) {
+    return true;
+  }
+
+  return false;
+}
+
 type ProfilePlan =
   | 'free'
   | 'pro'
@@ -45,9 +99,11 @@ export function resolveWebhookIdentity(event: LemonSqueezyWebhookEvent): {
   clerkUserId: string | null;
 } {
   const email = event.data.attributes.user_email?.trim().toLowerCase() || null;
+  const customData = event.meta.custom_data ?? {};
   const clerkUserId =
-    event.meta.custom_data?.clerk_user_id?.trim() ||
-    event.meta.custom_data?.clerkUserId?.trim() ||
+    coerceCustomDataString(customData.clerk_user_id) ||
+    coerceCustomDataString(customData.clerkUserId) ||
+    coerceCustomDataString(customData.user_id) ||
     null;
 
   return { email, clerkUserId };
@@ -59,25 +115,27 @@ export function isActiveSubscriptionStatus(status: string | undefined): boolean 
 }
 
 export function isProSubscriptionProduct(
-  productId: number,
-  variantId: number,
+  productId: number | string | null | undefined,
+  variantId: number | string | null | undefined,
 ): boolean {
-  const proProductId = process.env.LEMONSQUEEZY_PRO_PRODUCT_ID;
-  const proVariantId = process.env.LEMONSQUEEZY_PRO_VARIANT_ID;
+  return matchesLemonProduct(
+    productId,
+    variantId,
+    process.env.LEMONSQUEEZY_PRO_PRODUCT_ID,
+    process.env.LEMONSQUEEZY_PRO_VARIANT_ID,
+  );
+}
 
-  if (!proProductId && !proVariantId) {
-    return true;
-  }
-
-  if (proVariantId && variantId.toString() === proVariantId) {
-    return true;
-  }
-
-  if (proProductId && productId.toString() === proProductId) {
-    return true;
-  }
-
-  return false;
+export function isLtdProduct(
+  productId: number | string | null | undefined,
+  variantId: number | string | null | undefined,
+): boolean {
+  return matchesLemonProduct(
+    productId,
+    variantId,
+    process.env.LEMONSQUEEZY_LTD_PRODUCT_ID,
+    process.env.LEMONSQUEEZY_LTD_VARIANT_ID,
+  );
 }
 
 export async function findProfile(
@@ -131,17 +189,18 @@ export async function syncProfilePlan(
       ? existingTier
       : resolveUserTierForPlan(input.planStatus);
 
+  const resolvedClerkUserId =
+    input.clerkUserId || existing?.clerk_user_id || null;
+
   const row: Record<string, string | number | null> = {
-    email: input.email,
+    email: existing?.email ?? input.email,
     plan_status: input.planStatus,
     user_tier: nextTier,
     updated_at: new Date().toISOString(),
   };
 
-  if (input.clerkUserId) {
-    row.clerk_user_id = input.clerkUserId;
-  } else if (existing?.clerk_user_id) {
-    row.clerk_user_id = existing.clerk_user_id;
+  if (resolvedClerkUserId) {
+    row.clerk_user_id = resolvedClerkUserId;
   }
 
   if (input.subscriptionId) {
@@ -152,17 +211,25 @@ export async function syncProfilePlan(
     row.lemon_squeezy_order_id = input.orderId;
   }
 
-  const { error } = await supabase.from('profiles').upsert(row, { onConflict: 'email' });
+  if (existing?.id) {
+    const { error } = await supabase.from('profiles').update(row).eq('id', existing.id);
+    if (error) {
+      throw error;
+    }
+    return;
+  }
+
+  const conflictKey = resolvedClerkUserId ? 'clerk_user_id' : 'email';
+  const { error } = await supabase.from('profiles').upsert(row, { onConflict: conflictKey });
 
   if (error) {
     throw error;
   }
 }
 
-export async function markWebhookProcessed(
+export async function hasWebhookBeenProcessed(
   supabase: SupabaseClient,
   eventId: string,
-  eventName: string,
 ): Promise<boolean> {
   const { data: existing, error: lookupError } = await supabase
     .from('webhook_events')
@@ -174,10 +241,14 @@ export async function markWebhookProcessed(
     throw lookupError;
   }
 
-  if (existing) {
-    return false;
-  }
+  return Boolean(existing);
+}
 
+export async function markWebhookProcessed(
+  supabase: SupabaseClient,
+  eventId: string,
+  eventName: string,
+): Promise<void> {
   const { error: insertError } = await supabase.from('webhook_events').insert({
     id: eventId,
     event_name: eventName,
@@ -186,8 +257,6 @@ export async function markWebhookProcessed(
   if (insertError) {
     throw insertError;
   }
-
-  return true;
 }
 
 export function buildWebhookEventId(event: LemonSqueezyWebhookEvent): string {
