@@ -104,14 +104,6 @@ const nextConfig: NextConfig = {
     return {
       beforeFiles: [
         {
-          source: "/api/video-studio/bake",
-          destination: `${backend}/api/video-studio/bake`,
-        },
-        {
-          source: "/api/video-studio/render-status/:path*",
-          destination: `${backend}/api/video-studio/render-status/:path*`,
-        },
-        {
           source: "/api/video-studio/published-assets",
           destination: `${backend}/api/video-studio/published-assets`,
         },

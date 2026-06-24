@@ -22,7 +22,13 @@ import { PLAN_UPDATED_EVENT, QUOTA_UPDATED_EVENT } from '@/lib/plan-events';
 import AppSumoJoyModal, { scheduleAppSumoJoyPrompt } from '@/components/review/AppSumoJoyModal';
 
 const BAKE_POLL_INTERVAL_MS = 2500;
-const BAKE_POLL_MAX_ATTEMPTS = 180;
+/** ~12.5 minutes at 2.5s — FFmpeg + voice + download can exceed 7 min on a busy droplet. */
+const BAKE_POLL_MAX_ATTEMPTS = 300;
+const BAKE_POLL_TRANSIENT_RETRIES = 8;
+
+function isTransientPollStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504 || status === 429;
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -41,14 +47,24 @@ async function pollBakeUntilComplete(
   jobId: string,
   onProgress: (status: BakeStatusPayload) => void,
 ): Promise<BakeStatusPayload> {
+  let transientErrors = 0;
+
   for (let attempt = 0; attempt < BAKE_POLL_MAX_ATTEMPTS; attempt += 1) {
     const statusRes = await fetch(
       getApiUrl(`/api/video-studio/render-status/${encodeURIComponent(jobId)}`),
       { cache: 'no-store' },
     );
+
     if (!statusRes.ok) {
+      if (isTransientPollStatus(statusRes.status) && transientErrors < BAKE_POLL_TRANSIENT_RETRIES) {
+        transientErrors += 1;
+        await sleep(BAKE_POLL_INTERVAL_MS);
+        continue;
+      }
       throw new Error(`Bake status check failed (${statusRes.status})`);
     }
+
+    transientErrors = 0;
 
     const statusJson = (await statusRes.json()) as BakeStatusPayload;
     onProgress(statusJson);
@@ -56,7 +72,7 @@ async function pollBakeUntilComplete(
     if (statusJson.status === 'done' && statusJson.final_video_url) {
       return statusJson;
     }
-    if (statusJson.status === 'failed') {
+    if (statusJson.status === 'failed' || statusJson.status === 'not_found') {
       throw new Error(statusJson.error || 'Video baking failed on the server.');
     }
 
@@ -214,7 +230,12 @@ function AIStudioContent() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to communicate with FastAPI Backend");
+        const errJson = await response.json().catch(() => null);
+        if (errJson?.script_engine) {
+          setAdScript(parseScriptEngine(errJson.script_engine, incomingTitle));
+          return;
+        }
+        throw new Error('Failed to communicate with FastAPI Backend');
       }
 
       const resData = await response.json();
@@ -311,8 +332,29 @@ function AIStudioContent() {
       }
 
       if (!response.ok && response.status !== 202) {
-        const errText = await response.text().catch(() => '');
-        throw new Error(errText || `Baking pipeline failed (${response.status})`);
+        let detail = '';
+        try {
+          const errJson = await response.json();
+          detail =
+            typeof errJson?.detail === 'string'
+              ? errJson.detail
+              : typeof errJson?.detail?.message === 'string'
+                ? errJson.detail.message
+                : typeof errJson?.error === 'string'
+                  ? errJson.error
+                  : '';
+        } catch {
+          detail = await response.text().catch(() => '');
+        }
+
+        if (response.status === 502) {
+          throw new Error(
+            detail ||
+              'Cannot reach the video backend from Vercel. Check droplet port 8001 and BACKEND_REWRITE_URL.',
+          );
+        }
+
+        throw new Error(detail || `Baking pipeline failed (${response.status})`);
       }
 
       let renderId = '';

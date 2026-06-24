@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -24,11 +25,13 @@ from video_baker import FFmpegBakeError, bake_final_mp4, ffmpeg_available
 logger = logging.getLogger("droplogic.bake_jobs")
 
 OUTPUTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "outputs")
+JOBS_DIR = os.path.join(OUTPUTS_DIR, ".jobs")
 
 MAX_CONCURRENT_BAKES = max(1, min(2, int(os.getenv("MAX_CONCURRENT_BAKES", "1"))))
 BAKE_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_BAKES)
 BAKE_JOB_TTL_SEC = int(os.getenv("BAKE_JOB_TTL_SEC", "7200"))
 BAKE_JOB_MAX_COUNT = int(os.getenv("BAKE_JOB_MAX_COUNT", "500"))
+BAKE_JOB_UNKNOWN_GRACE_SEC = int(os.getenv("BAKE_JOB_UNKNOWN_GRACE_SEC", "90"))
 
 BakeJobStatus = Literal["queued", "rendering", "done", "failed"]
 
@@ -61,6 +64,100 @@ class BakeJob:
 BAKE_JOBS: dict[str, BakeJob] = {}
 
 
+def _ensure_jobs_dir() -> None:
+    os.makedirs(JOBS_DIR, exist_ok=True)
+
+
+def _job_record_path(job_id: str) -> str:
+    safe_id = os.path.basename(job_id)
+    return os.path.join(JOBS_DIR, f"{safe_id}.json")
+
+
+def _job_to_record(job: BakeJob) -> dict[str, Any]:
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "file_path": job.file_path,
+        "provider": job.provider,
+        "final_video_url": job.final_video_url,
+        "error": job.error,
+        "marketing_assets": job.marketing_assets,
+        "message": job.message,
+    }
+
+
+def _persist_job(job: BakeJob) -> None:
+    try:
+        _ensure_jobs_dir()
+        record = _job_to_record(job)
+        path = _job_record_path(job.job_id)
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(record, handle)
+        os.replace(tmp_path, path)
+    except OSError as exc:
+        logger.warning("[BAKE JOB] Failed to persist job %s: %s", job.job_id, exc)
+
+
+def _load_job_from_disk(job_id: str) -> BakeJob | None:
+    path = _job_record_path(job_id)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            record = json.load(handle)
+        return BakeJob(
+            job_id=record["job_id"],
+            status=record["status"],
+            request=None,
+            created_at=float(record.get("created_at") or time.time()),
+            updated_at=float(record.get("updated_at") or time.time()),
+            file_path=record.get("file_path") or "",
+            provider=record.get("provider") or "",
+            final_video_url=record.get("final_video_url"),
+            error=record.get("error"),
+            marketing_assets=record.get("marketing_assets"),
+            message=record.get("message"),
+        )
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("[BAKE JOB] Failed to load persisted job %s: %s", job_id, exc)
+        return None
+
+
+def _get_job(job_id: str) -> BakeJob | None:
+    job = BAKE_JOBS.get(job_id)
+    if job:
+        return job
+    disk_job = _load_job_from_disk(job_id)
+    if disk_job:
+        BAKE_JOBS[job_id] = disk_job
+    return disk_job
+
+
+def _job_unique_id(job_id: str) -> str:
+    return job_id.removeprefix("bake_").removeprefix("local_")
+
+
+def _output_video_path_for_job(job_id: str) -> str:
+    return os.path.join(OUTPUTS_DIR, f"final_video_{_job_unique_id(job_id)}.mp4")
+
+
+def _completed_output_status(job_id: str) -> dict[str, Any] | None:
+    output_path = _output_video_path_for_job(job_id)
+    if os.path.isfile(output_path) and os.path.getsize(output_path) > 100 * 1024:
+        filename = os.path.basename(output_path)
+        return {
+            "render_id": job_id,
+            "status": "done",
+            "final_video_url": static_asset_url(f"outputs/{filename}"),
+            "provider": "ffmpeg",
+            "message": "Bake completed (recovered from output file).",
+        }
+    return None
+
+
 def _prune_bake_jobs() -> None:
     now = time.time()
     expired = [
@@ -71,6 +168,10 @@ def _prune_bake_jobs() -> None:
     for job_id in expired:
         BAKE_JOBS.pop(job_id, None)
         RENDER_JOBS.pop(job_id, None)
+        try:
+            os.remove(_job_record_path(job_id))
+        except OSError:
+            pass
 
     if len(BAKE_JOBS) <= BAKE_JOB_MAX_COUNT:
         return
@@ -100,6 +201,7 @@ def create_bake_job(request: Any) -> BakeJob:
     job_id = f"bake_{unique_id}"
     job = BakeJob(job_id=job_id, status="queued", request=request)
     BAKE_JOBS[job_id] = job
+    _persist_job(job)
     return job
 
 
@@ -138,7 +240,11 @@ async def _execute_bake_pipeline(
 
     full_custom_script = f"{request.final_hook} {request.final_body} {request.final_cta}"
     try:
-        temp_voice_file = generate_voice_over(full_custom_script, request.selected_voice)
+        temp_voice_file = generate_voice_over(
+            full_custom_script,
+            request.selected_voice,
+            job_suffix=unique_id,
+        )
         temp_cleanup_paths.append(temp_voice_file)
     except Exception as voice_err:
         raise BakePipelineError(f"Voice synthesis failed: {voice_err}") from voice_err
@@ -292,8 +398,16 @@ async def _execute_bake_pipeline(
 
 
 async def run_bake_background(job_id: str) -> None:
-    job = BAKE_JOBS.get(job_id)
+    job = _get_job(job_id)
     if not job:
+        return
+
+    request = job.request
+    if request is None:
+        job.status = "failed"
+        job.error = "Bake request payload was lost after server restart. Please start a new bake."
+        job.updated_at = time.time()
+        _persist_job(job)
         return
 
     temp_cleanup_paths: list[str] = []
@@ -302,6 +416,7 @@ async def run_bake_background(job_id: str) -> None:
     try:
         job.status = "queued"
         job.updated_at = time.time()
+        _persist_job(job)
         logger.info(
             "[BAKE QUEUE] job_id=%s queued (max_concurrent=%s, waiting=%s)",
             job_id,
@@ -312,6 +427,7 @@ async def run_bake_background(job_id: str) -> None:
         async with BAKE_SEMAPHORE:
             job.status = "rendering"
             job.updated_at = time.time()
+            _persist_job(job)
             logger.info("[BAKE QUEUE] job_id=%s acquired slot — starting pipeline", job_id)
 
             payload, temp_cleanup_paths, output_video_path = await _execute_bake_pipeline(
@@ -325,28 +441,35 @@ async def run_bake_background(job_id: str) -> None:
             job.message = payload.get("message")
             job.marketing_assets = payload.get("marketing_assets")
             job.file_path = output_video_path
+            _persist_job(job)
             logger.info("[✅ BAKE JOB] job_id=%s completed", job_id)
 
     except BakePipelineError as exc:
         job.status = "failed"
         job.error = str(exc)
+        _persist_job(job)
         logger.warning("[❌ BAKE JOB] job_id=%s failed: %s", job_id, exc)
     except CloudRenderError as exc:
         job.status = "failed"
         job.error = str(exc)
+        _persist_job(job)
         logger.error("[❌ BAKE JOB] cloud render failed job_id=%s: %s", job_id, exc)
     except httpx.UnsupportedProtocol as exc:
         job.status = "failed"
         job.error = f"Invalid video URL protocol: {exc}"
+        _persist_job(job)
     except httpx.ConnectError as exc:
         job.status = "failed"
         job.error = f"Network/DNS error during bake: {exc}"
+        _persist_job(job)
     except Exception as exc:
         job.status = "failed"
         job.error = f"Internal baking pipeline failed: {exc}"
+        _persist_job(job)
         logger.error("[❌ BAKE JOB] job_id=%s unexpected error: %s", job_id, exc, exc_info=True)
     finally:
         job.updated_at = time.time()
+        _persist_job(job)
         if temp_cleanup_paths:
             cleanup_bake_temp_assets(
                 temp_cleanup_paths,
@@ -356,8 +479,11 @@ async def run_bake_background(job_id: str) -> None:
 
 
 def bake_status_response(job_id: str) -> dict[str, Any] | None:
-    job = BAKE_JOBS.get(job_id)
+    job = _get_job(job_id)
     if not job:
+        recovered = _completed_output_status(job_id)
+        if recovered:
+            return recovered
         return None
 
     if job.status == "queued":
@@ -378,10 +504,12 @@ def bake_status_response(job_id: str) -> dict[str, Any] | None:
         }
 
     if job.status == "done":
+        recovered = _completed_output_status(job_id)
+        final_video_url = job.final_video_url or (recovered or {}).get("final_video_url")
         return {
             "render_id": job_id,
             "status": "done",
-            "final_video_url": job.final_video_url,
+            "final_video_url": final_video_url,
             "provider": job.provider,
             "message": job.message,
             "marketing_assets": job.marketing_assets,
@@ -392,4 +520,32 @@ def bake_status_response(job_id: str) -> dict[str, Any] | None:
         "status": "failed",
         "final_video_url": None,
         "error": job.error or "Bake failed",
+    }
+
+
+def bake_status_or_unknown(job_id: str) -> dict[str, Any]:
+    """Resolve bake job status, including graceful unknown-job handling."""
+    status = bake_status_response(job_id)
+    if status:
+        return status
+
+    recovered = _completed_output_status(job_id)
+    if recovered:
+        return recovered
+
+    if job_id.startswith("bake_"):
+        return {
+            "render_id": job_id,
+            "status": "not_found",
+            "final_video_url": None,
+            "error": (
+                "Bake job not found on this server. It may have expired, failed during a restart, "
+                "or never started. Please start a new bake."
+            ),
+        }
+
+    return {
+        "render_id": job_id,
+        "status": "rendering",
+        "final_video_url": None,
     }

@@ -54,6 +54,7 @@ from url_utils import sanitize_download_url
 from bake_jobs import (
     RENDER_JOBS,
     bake_queue_position,
+    bake_status_or_unknown,
     bake_status_response,
     create_bake_job,
     run_bake_background,
@@ -961,70 +962,90 @@ async def start_video_baking_pipeline(
     request: VideoBakeRequest,
     background_tasks: BackgroundTasks,
 ):
-    raw_video_input = (request.video_url or "").strip()
-    if not raw_video_input or raw_video_input.lower() in {"null", "undefined", "none"}:
-        raise HTTPException(
-            status_code=400,
-            detail="Target raw video source URL cannot be empty. Select a TikTok asset in Results and launch Studio again.",
-        )
-
-    source_video_url = resolve_bake_video_url(
-        raw_video_input,
-        backend_public_url=backend_public_origin(),
-    )
-    if not source_video_url:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Source video URL is invalid, blocked, or missing https://. "
-                f"Received: {raw_video_input[:120]!r}"
-            ),
-        )
-
     try:
-        quota_status = await enforce_bake_quota(request.clerk_user_id, request.email)
-        print(
-            f"[📊 QUOTA] User {request.clerk_user_id} | tier={quota_status.user_tier} "
-            f"| plan={quota_status.plan_status} "
-            f"| used={quota_status.used}/{quota_status.limit} ({quota_status.period})"
+        raw_video_input = (request.video_url or "").strip()
+        if not raw_video_input or raw_video_input.lower() in {"null", "undefined", "none"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Target raw video source URL cannot be empty. Select a TikTok asset in Results and launch Studio again.",
+            )
+
+        source_video_url = resolve_bake_video_url(
+            raw_video_input,
+            backend_public_url=backend_public_origin(),
         )
-    except QuotaExceededError as quota_err:
-        status = quota_err.status
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "quota_exceeded",
-                "message": status.message,
-                "plan_status": status.plan_status,
-                "user_tier": status.user_tier,
-                "limit": status.limit,
-                "used": status.used,
-                "period": status.period,
+        if not source_video_url:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Source video URL is invalid, blocked, or missing https://. "
+                    f"Received: {raw_video_input[:120]!r}"
+                ),
+            )
+
+        try:
+            quota_status = await enforce_bake_quota(request.clerk_user_id, request.email)
+            print(
+                f"[📊 QUOTA] User {request.clerk_user_id} | tier={quota_status.user_tier} "
+                f"| plan={quota_status.plan_status} "
+                f"| used={quota_status.used}/{quota_status.limit} ({quota_status.period})"
+            )
+        except QuotaExceededError as quota_err:
+            status = quota_err.status
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "quota_exceeded",
+                    "message": status.message,
+                    "plan_status": status.plan_status,
+                    "user_tier": status.user_tier,
+                    "limit": status.limit,
+                    "used": status.used,
+                    "period": status.period,
+                },
+            ) from quota_err
+        except Exception as quota_exc:
+            logger.warning(
+                "Quota check degraded for %s — allowing bake enqueue: %s",
+                request.clerk_user_id,
+                quota_exc,
+                exc_info=True,
+            )
+
+        job = create_bake_job(request)
+        background_tasks.add_task(run_bake_background, job.job_id)
+
+        print(
+            f"[🚀 BAKE ENQUEUED] job_id={job.job_id} product={request.product_name!r} "
+            f"(max_concurrent={MAX_CONCURRENT_BAKES})"
+        )
+
+        return JSONResponse(
+            status_code=202,
+            content={
+                "success": True,
+                "accepted": True,
+                "status": "queued",
+                "render_id": job.job_id,
+                "job_id": job.job_id,
+                "queue_position": bake_queue_position(job.job_id) or 1,
+                "max_concurrent_bakes": MAX_CONCURRENT_BAKES,
+                "message": "Video bake queued. Poll render-status until done.",
+                "check_status_url": api_public_url(f"video-studio/render-status/{job.job_id}"),
             },
-        ) from quota_err
-
-    job = create_bake_job(request)
-    background_tasks.add_task(run_bake_background, job.job_id)
-
-    print(
-        f"[🚀 BAKE ENQUEUED] job_id={job.job_id} product={request.product_name!r} "
-        f"(max_concurrent={MAX_CONCURRENT_BAKES})"
-    )
-
-    return JSONResponse(
-        status_code=202,
-        content={
-            "success": True,
-            "accepted": True,
-            "status": "queued",
-            "render_id": job.job_id,
-            "job_id": job.job_id,
-            "queue_position": bake_queue_position(job.job_id) or 1,
-            "max_concurrent_bakes": MAX_CONCURRENT_BAKES,
-            "message": "Video bake queued. Poll render-status until done.",
-            "check_status_url": api_public_url(f"video-studio/render-status/{job.job_id}"),
-        },
-    )
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[❌ BAKE ENQUEUE] Unexpected failure: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "bake_enqueue_failed",
+                "message": "Could not enqueue video bake. Please retry in a moment.",
+                "error": str(exc),
+            },
+        ) from exc
 
 
 # ----------------------------------------------------------------------
@@ -1032,6 +1053,9 @@ async def start_video_baking_pipeline(
 # ----------------------------------------------------------------------
 @video_studio_router.get("/render-status/{render_id}", summary="Fetch bake/cloud render status")
 async def get_render_status(render_id: str):
+    if render_id.startswith("bake_"):
+        return bake_status_or_unknown(render_id)
+
     bake_status = bake_status_response(render_id)
     if bake_status:
         return bake_status

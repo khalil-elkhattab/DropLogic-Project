@@ -23,7 +23,12 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(MUSIC_DIR, exist_ok=True)
 
 
-def generate_voice_over(text: str, voice_profile: str) -> str:
+def generate_voice_over(
+    text: str,
+    voice_profile: str,
+    *,
+    job_suffix: str | None = None,
+) -> str:
     print(f"[🎙️ TTS ENGINE] Generating voiceover for profile: '{voice_profile}'")
     lang = "en"
     tld = "com"
@@ -33,8 +38,9 @@ def generate_voice_over(text: str, voice_profile: str) -> str:
     elif "oliver" in voice_profile.lower():
         tld = "ca"
 
+    suffix = (job_suffix or os.urandom(4).hex()).strip() or os.urandom(4).hex()
+    temp_voice_path = os.path.join(OUTPUT_DIR, f"voice_{suffix}.mp3")
     tts = gTTS(text=text, lang=lang, tld=tld, slow=False)
-    temp_voice_path = os.path.join(OUTPUT_DIR, "temp_voice.mp3")
     tts.save(temp_voice_path)
 
     print(f"[🟢 TTS COMPLETED] Temporary voice saved at: {temp_voice_path}")
