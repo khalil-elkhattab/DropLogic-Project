@@ -56,10 +56,20 @@ fi
 echo "==> Install Python deps (if venv exists)"
 if [ -d venv ]; then
   source venv/bin/activate
-  pip install -q -r requirements.txt 2>/dev/null || pip install -q httpx fastapi uvicorn python-dotenv groq gtts pedalboard numpy requests 2>/dev/null || true
+  pip install -q -r requirements.txt 2>/dev/null || pip install -q httpx fastapi uvicorn python-dotenv groq gtts pedalboard numpy requests pydantic 2>/dev/null || true
 fi
 
-echo "==> Restart uvicorn on 0.0.0.0:8001"
+echo "==> Verify Python imports from backend/"
+if [ -d venv ]; then
+  source venv/bin/activate
+fi
+python3 -c "import video_baker; import bake_jobs; import main; print('import ok')" || {
+  echo "ERROR: Python import failed — run manually:"
+  echo "  cd ${APP_DIR}/backend && source venv/bin/activate && python3 -c 'import main'"
+  exit 1
+}
+
+echo "==> Restart uvicorn on 0.0.0.0:8001 (must run from backend/)"
 if systemctl is-active --quiet droplogic 2>/dev/null; then
   sudo systemctl restart droplogic
   sleep 2

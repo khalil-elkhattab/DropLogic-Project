@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+httpx
+python-dotenv
+groq
+gtts
+pedalboard
+numpy
+requests
+pydantic

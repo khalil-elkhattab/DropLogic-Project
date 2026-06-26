@@ -1,0 +1,214 @@
+/* Scoped to dashboard launchpad only — do not use elsewhere */
+
+.dl-launchpad {
+  --lp-green: #22ff9b;
+  --lp-green-dim: rgba(34, 255, 155, 0.12);
+  --lp-violet: #a855f7;
+  --lp-violet-dim: rgba(168, 85, 247, 0.15);
+  --lp-cyan: #67e8f9;
+}
+
+.dl-launchpad-hero-glow {
+  position: absolute;
+  width:  min(90vw, 720px);
+  height: 320px;
+  top: -80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at center, rgba(34, 255, 155, 0.08) 0%, rgba(168, 85, 247, 0.06) 45%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dl-launchpad-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--lp-green), var(--lp-violet), transparent);
+  opacity: 0.45;
+}
+
+.dl-launchpad-stat-pill {
+  background: rgba(9, 9, 11, 0.75);
+  border: 1px solid rgba(34, 255, 155, 0.2);
+  box-shadow: 0 0 24px rgba(34, 255, 155, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.dl-launchpad-stat-pill--violet {
+  border-color: rgba(168, 85, 247, 0.25);
+  box-shadow: 0 0 24px rgba(168, 85, 247, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.dl-launchpad-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lp-green);
+  box-shadow: 0 0 10px var(--lp-green);
+  animation: lp-pulse-dot 1.8s ease-in-out infinite;
+}
+
+@keyframes lp-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.dl-launchpad-preview-card {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border-radius: 28px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #0c0c10;
+  transition: border-color 0.45s ease, box-shadow 0.45s ease, transform 0.45s ease;
+}
+
+.dl-launchpad-preview-card:hover {
+  border-color: rgba(34, 255, 155, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(34, 255, 155, 0.15),
+    0 0 40px rgba(34, 255, 155, 0.12),
+    0 0 60px rgba(168, 85, 247, 0.1),
+    0 24px 48px -16px rgba(0, 0, 0, 0.6);
+  transform: translateY(-4px);
+}
+
+.dl-launchpad-preview-bg {
+  position: absolute;
+  inset: -8%;
+  background-size: 200% 200%;
+  animation: lp-gradient-shift 8s ease infinite, lp-ken-burns 14s ease-in-out infinite alternate;
+}
+
+.dl-launchpad-preview-card:nth-child(2) .dl-launchpad-preview-bg {
+  animation-duration: 10s, 16s;
+  animation-delay: -2s, -4s;
+}
+
+.dl-launchpad-preview-card:nth-child(3) .dl-launchpad-preview-bg {
+  animation-duration: 9s, 12s;
+  animation-delay: -4s, -2s;
+}
+
+.dl-launchpad-preview-card:nth-child(4) .dl-launchpad-preview-bg {
+  animation-duration: 11s, 18s;
+  animation-delay: -1s, -6s;
+}
+
+@keyframes lp-gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes lp-ken-burns {
+  0% { transform: scale(1) translate(0, 0); }
+  100% { transform: scale(1.12) translate(-2%, -1.5%); }
+}
+
+.dl-launchpad-scanline {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(34, 255, 155, 0.03) 48%,
+    rgba(168, 85, 247, 0.05) 52%,
+    transparent 100%
+  );
+  background-size: 100% 220%;
+  animation: lp-scan 4s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes lp-scan {
+  0% { background-position: 0% -100%; }
+  100% { background-position: 0% 200%; }
+}
+
+.dl-launchpad-skeleton-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.04) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: lp-shimmer 2.4s ease-in-out infinite;
+}
+
+@keyframes lp-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.dl-launchpad-play-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid rgba(34, 255, 155, 0.35);
+  background: rgba(9, 9, 11, 0.65);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 24px rgba(34, 255, 155, 0.2);
+  animation: lp-play-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes lp-play-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(34, 255, 155, 0.15); }
+  50% { box-shadow: 0 0 32px rgba(34, 255, 155, 0.35), 0 0 48px rgba(168, 85, 247, 0.15); }
+}
+
+.dl-launchpad-flow-step {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+  padding: 1.5rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(145deg, rgba(20, 20, 28, 0.9) 0%, rgba(12, 12, 16, 0.95) 100%);
+  transition: border-color 0.35s ease, box-shadow 0.35s ease;
+}
+
+.dl-launchpad-flow-step:hover {
+  border-color: rgba(168, 85, 247, 0.35);
+  box-shadow: 0 0 32px rgba(168, 85, 247, 0.1);
+}
+
+.dl-launchpad-flow-connector {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .dl-launchpad-flow-connector {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    width: 48px;
+    color: var(--lp-green);
+    opacity: 0.5;
+  }
+}
+
+.dl-launchpad-usage-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.dl-launchpad-usage-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--lp-green), var(--lp-violet));
+  box-shadow: 0 0 12px rgba(34, 255, 155, 0.4);
+  transition: width 1.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dl-launchpad-matrix-lines {
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(34, 255, 155, 0.4) 2px, rgba(34, 255, 155, 0.4) 3px);
+  pointer-events: none;
+}
