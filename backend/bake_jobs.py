@@ -239,15 +239,36 @@ async def _execute_bake_pipeline(
         )
 
     full_custom_script = f"{request.final_hook} {request.final_body} {request.final_cta}"
+    temp_source_video = os.path.join(OUTPUTS_DIR, f"temp_source_{unique_id}.mp4")
+    temp_cleanup_paths.append(temp_source_video)
+
+    output_video_filename = f"final_video_{unique_id}.mp4"
+    output_video_path = os.path.join(OUTPUTS_DIR, output_video_filename)
+
+    logger.info("[BAKE] Parallel voice synthesis + source video download")
     try:
-        temp_voice_file = generate_voice_over(
-            full_custom_script,
-            request.selected_voice,
-            job_suffix=unique_id,
+        temp_voice_file, downloaded = await asyncio.gather(
+            asyncio.to_thread(
+                generate_voice_over,
+                full_custom_script,
+                request.selected_voice,
+                job_suffix=unique_id,
+            ),
+            download_media_to_file(
+                source_video_url,
+                temp_source_video,
+                backend_public_url=backend_public_origin(),
+            ),
         )
-        temp_cleanup_paths.append(temp_voice_file)
     except Exception as voice_err:
         raise BakePipelineError(f"Voice synthesis failed: {voice_err}") from voice_err
+
+    temp_cleanup_paths.append(temp_voice_file)
+
+    if not downloaded or not os.path.isfile(temp_source_video):
+        raise BakePipelineError(
+            "Could not download source video for baking. Re-run analysis to refresh cached clips."
+        )
 
     try:
         mix_voice_and_background(
@@ -261,23 +282,7 @@ async def _execute_bake_pipeline(
     final_audio_path = os.path.join(OUTPUTS_DIR, f"mix_{unique_id}.wav")
     temp_cleanup_paths.append(final_audio_path)
     public_audio_url = static_asset_url(f"outputs/mix_{unique_id}.wav")
-
-    output_video_filename = f"final_video_{unique_id}.mp4"
-    output_video_path = os.path.join(OUTPUTS_DIR, output_video_filename)
     audio_duration = get_media_duration_seconds(final_audio_path) or float(request.video_duration or 15.0)
-
-    temp_source_video = os.path.join(OUTPUTS_DIR, f"temp_source_{unique_id}.mp4")
-    temp_cleanup_paths.append(temp_source_video)
-
-    downloaded = await download_media_to_file(
-        source_video_url,
-        temp_source_video,
-        backend_public_url=backend_public_origin(),
-    )
-    if not downloaded or not os.path.isfile(temp_source_video):
-        raise BakePipelineError(
-            "Could not download source video for baking. Re-run analysis to refresh cached clips."
-        )
 
     ass_path: str | None = None
     if request.burn_captions:
