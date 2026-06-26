@@ -56,9 +56,9 @@ class AntiBanProfile:
         if not self.enabled:
             return "anti-ban=off"
         return (
-            f"mirror={self.mirror} speed={self.video_speed:.4f} zoom={self.zoom_factor:.4f} "
+            f"mirror={self.mirror} zoom={self.zoom_factor:.4f} "
             f"eq(c={self.eq_contrast:.3f},b={self.eq_brightness:.4f},s={self.eq_saturation:.3f}) "
-            f"audio(tempo={self.audio_tempo:.4f},pitch={self.audio_pitch:.4f})"
+            f"audio=unchanged"
         )
 
 
@@ -134,13 +134,13 @@ def build_anti_ban_profile(
     return AntiBanProfile(
         enabled=True,
         mirror=True,
-        video_speed=random.uniform(1.018, 1.032),
+        video_speed=1.0,
         zoom_factor=zoom,
         eq_contrast=random.uniform(1.008, 1.028),
         eq_brightness=random.uniform(0.004, 0.022),
         eq_saturation=random.uniform(1.012, 1.038),
-        audio_tempo=random.uniform(0.968, 0.982),
-        audio_pitch=random.uniform(1.008, 1.018),
+        audio_tempo=1.0,
+        audio_pitch=1.0,
         metadata=_build_smartphone_metadata(),
     )
 
@@ -157,14 +157,13 @@ def _build_video_filter(
     profile: AntiBanProfile,
     subtitle_path: Optional[str],
 ) -> str:
-    """Assemble video filter chain: mirror, speed, zoom, color grade, 9:16, captions."""
+    """Assemble video filter chain: mirror, zoom, color grade, 9:16, captions (no speed change)."""
     if profile.enabled:
         zoom_w = max(1, round(OUTPUT_WIDTH * profile.zoom_factor))
         zoom_h = max(1, round(OUTPUT_HEIGHT * profile.zoom_factor))
         parts: list[str] = []
         if profile.mirror:
             parts.append("hflip")
-        parts.append(f"setpts=PTS*{profile.video_speed:.6f}")
         parts.append(f"scale={zoom_w}:{zoom_h}:flags=bilinear")
         parts.append(f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}")
         parts.append(
@@ -182,30 +181,6 @@ def _build_video_filter(
         return f"[0:v]{chain},subtitles='{esc}'[v]"
 
     return f"[0:v]{chain}[v]"
-
-
-def _build_audio_filter(profile: AntiBanProfile) -> Optional[str]:
-    """
-    Micro pitch + tempo shift so audio fingerprinting sees a unique waveform.
-    asetrate shifts pitch/speed together; atempo compensates to the target tempo.
-    """
-    if not profile.enabled:
-        return None
-
-    asetrate = max(8000, int(OUTPUT_SAMPLE_RATE * profile.audio_pitch))
-    atempo = profile.audio_tempo / profile.audio_pitch
-    # FFmpeg atempo accepts ~0.5-2.0 per instance; chain if needed.
-    if 0.5 <= atempo <= 2.0:
-        tempo_filter = f"atempo={atempo:.6f}"
-    elif atempo < 0.5:
-        tempo_filter = f"atempo=0.5,atempo={atempo / 0.5:.6f}"
-    else:
-        tempo_filter = f"atempo=2.0,atempo={atempo / 2.0:.6f}"
-
-    return (
-        f"[1:a]asetrate={asetrate},aresample={OUTPUT_SAMPLE_RATE},"
-        f"{tempo_filter},aformat=sample_rates={OUTPUT_SAMPLE_RATE}:channel_layouts=stereo[a]"
-    )
 
 
 def _metadata_args(metadata: dict[str, str]) -> list[str]:
@@ -297,7 +272,8 @@ def _loop_video_to_duration(
     logger.info("[FFmpeg] Pass A (ultrafast remux loop) -> %s (%.2fs)", looped_path, duration)
 
 
-def _encode_args(*, profile: AntiBanProfile) -> list[str]:
+def _encode_args(*, profile: AntiBanProfile, audio_duration: float) -> list[str]:
+    duration = max(audio_duration, 0.5)
     args: list[str] = [
         "-c:v",
         "libx264",
@@ -317,7 +293,8 @@ def _encode_args(*, profile: AntiBanProfile) -> list[str]:
         "192k",
         "-ar",
         str(OUTPUT_SAMPLE_RATE),
-        "-shortest",
+        "-t",
+        f"{duration:.3f}",
         "-movflags",
         "+faststart",
     ]
@@ -336,11 +313,11 @@ def bake_final_mp4(
     subtitle_path: Optional[str] = None,
 ) -> str:
     """
-    Two-pass bake: loop source to audio length via stream copy, then encode filters once.
+    Two-pass bake: loop source video to match voiceover length, then encode filters once.
     Output is H.264/AAC MP4 at 1080x1920 for native TikTok vertical playback.
 
-    When ``anti_ban_filter`` is True, applies mirror, micro-zoom, color grade,
-    audio pitch/tempo shift, and unique smartphone metadata (unique MD5 per render).
+    Audio always plays at natural speed. Video loops back-to-back until the voiceover ends.
+    When ``anti_ban_filter`` is True, applies mirror, micro-zoom, and color grade only.
     """
     if not ffmpeg_available():
         raise FFmpegBakeError("ffmpeg is not installed or not on PATH")
@@ -355,9 +332,17 @@ def bake_final_mp4(
 
     profile = build_anti_ban_profile(enabled=anti_ban_filter, video_scale=video_scale)
     audio_duration = get_media_duration_seconds(audio_path)
+    if audio_duration < 0.5:
+        raise FFmpegBakeError(
+            f"Could not read voiceover duration from audio track: {audio_path}"
+        )
+
+    # Pad loop slightly so video always covers the full voiceover after filter/encode rounding.
+    loop_duration = audio_duration + 0.25
     logger.info(
-        "[FFmpeg] Baking vertical MP4 | audio=%.2fs | %s | source=%s",
+        "[FFmpeg] Baking vertical MP4 | audio=%.2fs loop=%.2fs | %s | source=%s",
         audio_duration,
+        loop_duration,
         profile.summary(),
         source_video_path,
     )
@@ -367,12 +352,10 @@ def bake_final_mp4(
         _loop_video_to_duration(
             source_video_path=source_video_path,
             looped_path=looped_path,
-            target_duration=audio_duration,
+            target_duration=loop_duration,
         )
 
         video_filter = _build_video_filter(profile=profile, subtitle_path=subtitle_path)
-        audio_filter = _build_audio_filter(profile)
-        filter_complex = video_filter if not audio_filter else f"{video_filter};{audio_filter}"
 
         cmd: list[str] = [
             "ffmpeg",
@@ -382,12 +365,12 @@ def bake_final_mp4(
             "-i",
             audio_path,
             "-filter_complex",
-            filter_complex,
+            video_filter,
             "-map",
             "[v]",
             "-map",
-            "[a]" if audio_filter else "1:a:0",
-            *_encode_args(profile=profile),
+            "1:a:0",
+            *_encode_args(profile=profile, audio_duration=audio_duration),
             output_path,
         ]
 
