@@ -8,6 +8,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Literal
 
 import httpx
@@ -214,7 +215,11 @@ async def _execute_bake_pipeline(
     unique_id = job_id.removeprefix("bake_").removeprefix("local_")
     temp_cleanup_paths: list[str] = []
 
-    print(f"\n[🚀 BAKE START] FFmpeg-first pipeline for: {request.product_name} (job={job_id})")
+    logger.info(
+        "[BAKE START] FFmpeg-first pipeline for: %s (job=%s)",
+        request.product_name,
+        job_id,
+    )
 
     source_video_url = resolve_bake_video_url(
         raw_video_input,
@@ -234,7 +239,7 @@ async def _execute_bake_pipeline(
         source_video_url = probed_url
     else:
         logger.warning(
-            "Source video probe failed for %r — continuing with sanitized URL",
+            "Source video probe failed for %r - continuing with sanitized URL",
             request.video_url[:160],
         )
 
@@ -249,10 +254,12 @@ async def _execute_bake_pipeline(
     try:
         temp_voice_file, downloaded = await asyncio.gather(
             asyncio.to_thread(
-                generate_voice_over,
-                full_custom_script,
-                request.selected_voice,
-                job_suffix=unique_id,
+                partial(
+                    generate_voice_over,
+                    full_custom_script,
+                    request.selected_voice,
+                    job_suffix=unique_id,
+                ),
             ),
             download_media_to_file(
                 source_video_url,
@@ -328,7 +335,7 @@ async def _execute_bake_pipeline(
                 "provider": provider,
             }
     else:
-        logger.warning("[FFmpeg] Not available on server — using cloud render fallback")
+        logger.warning("[FFmpeg] Not available on server - using cloud render fallback")
         provider = None
 
     if provider is None:
@@ -366,7 +373,7 @@ async def _execute_bake_pipeline(
             )
         except Exception as usage_err:
             logger.warning(
-                "[⚠️ USAGE] Bake succeeded but usage record failed for %s: %s",
+                "[WARN USAGE] Bake succeeded but usage record failed for %s: %s",
                 request.clerk_user_id,
                 usage_err,
             )
@@ -378,7 +385,7 @@ async def _execute_bake_pipeline(
                 video_url=final_video_url,
             )
         except Exception as history_err:
-            logger.warning("[⚠️ AD HISTORY] Failed to persist ad record: %s", history_err)
+            logger.warning("[WARN AD HISTORY] Failed to persist ad record: %s", history_err)
 
     clean_tags = request.product_name.replace(" ", "").lower()
     payload = {
@@ -433,7 +440,7 @@ async def run_bake_background(job_id: str) -> None:
             job.status = "rendering"
             job.updated_at = time.time()
             _persist_job(job)
-            logger.info("[BAKE QUEUE] job_id=%s acquired slot — starting pipeline", job_id)
+            logger.info("[BAKE QUEUE] job_id=%s acquired slot - starting pipeline", job_id)
 
             payload, temp_cleanup_paths, output_video_path = await _execute_bake_pipeline(
                 job.request,
@@ -447,18 +454,18 @@ async def run_bake_background(job_id: str) -> None:
             job.marketing_assets = payload.get("marketing_assets")
             job.file_path = output_video_path
             _persist_job(job)
-            logger.info("[✅ BAKE JOB] job_id=%s completed", job_id)
+            logger.info("[BAKE JOB] job_id=%s completed", job_id)
 
     except BakePipelineError as exc:
         job.status = "failed"
         job.error = str(exc)
         _persist_job(job)
-        logger.warning("[❌ BAKE JOB] job_id=%s failed: %s", job_id, exc)
+        logger.warning("[BAKE JOB] job_id=%s failed: %s", job_id, exc)
     except CloudRenderError as exc:
         job.status = "failed"
         job.error = str(exc)
         _persist_job(job)
-        logger.error("[❌ BAKE JOB] cloud render failed job_id=%s: %s", job_id, exc)
+        logger.error("[BAKE JOB] cloud render failed job_id=%s: %s", job_id, exc)
     except httpx.UnsupportedProtocol as exc:
         job.status = "failed"
         job.error = f"Invalid video URL protocol: {exc}"
@@ -471,7 +478,7 @@ async def run_bake_background(job_id: str) -> None:
         job.status = "failed"
         job.error = f"Internal baking pipeline failed: {exc}"
         _persist_job(job)
-        logger.error("[❌ BAKE JOB] job_id=%s unexpected error: %s", job_id, exc, exc_info=True)
+        logger.error("[BAKE JOB] job_id=%s unexpected error: %s", job_id, exc, exc_info=True)
     finally:
         job.updated_at = time.time()
         _persist_job(job)

@@ -120,8 +120,8 @@ def build_anti_ban_profile(
     """
     Build randomized anti-duplication parameters for one bake.
 
-    ``video_scale`` from the API: values > 1.0 are treated as zoom (1.01–1.05).
-    Legacy cloud value 0.9 is ignored; a random 1–3% zoom is used instead.
+    ``video_scale`` from the API: values > 1.0 are treated as zoom (1.01-1.05).
+    Legacy cloud value 0.9 is ignored; a random 1-3% zoom is used instead.
     """
     if not enabled:
         return AntiBanProfile(enabled=False)
@@ -194,7 +194,7 @@ def _build_audio_filter(profile: AntiBanProfile) -> Optional[str]:
 
     asetrate = max(8000, int(OUTPUT_SAMPLE_RATE * profile.audio_pitch))
     atempo = profile.audio_tempo / profile.audio_pitch
-    # FFmpeg atempo accepts ~0.5–2.0 per instance; chain if needed.
+    # FFmpeg atempo accepts ~0.5-2.0 per instance; chain if needed.
     if 0.5 <= atempo <= 2.0:
         tempo_filter = f"atempo={atempo:.6f}"
     elif atempo < 0.5:
@@ -264,11 +264,11 @@ def _loop_video_to_duration(
     ]
     result = subprocess.run(copy_cmd, capture_output=True, text=True, check=False)
     if result.returncode == 0 and os.path.isfile(looped_path) and os.path.getsize(looped_path) > 1024:
-        logger.info("[FFmpeg] Pass A (stream copy loop) → %s (%.2fs)", looped_path, duration)
+        logger.info("[FFmpeg] Pass A (stream copy loop) -> %s (%.2fs)", looped_path, duration)
         return
 
     logger.warning(
-        "[FFmpeg] Pass A stream copy failed — remuxing with ultrafast encode: %s",
+        "[FFmpeg] Pass A stream copy failed - remuxing with ultrafast encode: %s",
         (result.stderr or result.stdout or "")[-400:],
     )
     remux_cmd: list[str] = [
@@ -294,7 +294,7 @@ def _loop_video_to_duration(
         looped_path,
     ]
     _run_ffmpeg(remux_cmd, step="pass A remux")
-    logger.info("[FFmpeg] Pass A (ultrafast remux loop) → %s (%.2fs)", looped_path, duration)
+    logger.info("[FFmpeg] Pass A (ultrafast remux loop) -> %s (%.2fs)", looped_path, duration)
 
 
 def _encode_args(*, profile: AntiBanProfile) -> list[str]:
@@ -391,7 +391,7 @@ def bake_final_mp4(
             output_path,
         ]
 
-        logger.info("[FFmpeg] Pass B (filter + encode) → %s", output_path)
+        logger.info("[FFmpeg] Pass B (filter + encode) -> %s", output_path)
         _run_ffmpeg(cmd, step="pass B encode")
     finally:
         try:
@@ -406,7 +406,7 @@ def bake_final_mp4(
     out_md5 = _output_md5(output_path)
     out_duration = get_media_duration_seconds(output_path)
     logger.info(
-        "[FFmpeg] Bake complete → %s (%.2fs) md5=%s | %s",
+        "[FFmpeg] Bake complete -> %s (%.2fs) md5=%s | %s",
         output_path,
         out_duration,
         out_md5,
