@@ -122,3 +122,110 @@ async def fetch_all_platforms_assets(keyword: str):
         raise ScraperFetchError("TikTok API returned no valid videos", 200)
         
     return final_assets, accumulated_text
+
+
+def _rapidapi_headers() -> dict[str, str]:
+    return {
+        "x-rapidapi-key": RAPIDAPI_KEY or "",
+        "x-rapidapi-host": "tiktok-scraper7.p.rapidapi.com",
+        "accept": "application/json",
+    }
+
+
+def _extract_play_url_from_payload(payload: dict) -> str | None:
+    """Pull a direct MP4 CDN URL from tikwm / tiktok-scraper7 JSON shapes."""
+
+    def _pick_url(node: dict) -> str | None:
+        for key in ("hdplay", "play", "wmplay", "download_addr", "play_addr"):
+            value = node.get(key)
+            if isinstance(value, str) and value.strip().startswith(("http://", "https://")):
+                return value.strip()
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    data = payload.get("data")
+    if isinstance(data, dict):
+        found = _pick_url(data)
+        if found:
+            return found
+        for nested_key in ("video", "aweme_detail", "item", "aweme"):
+            nested = data.get(nested_key)
+            if isinstance(nested, dict):
+                found = _pick_url(nested)
+                if found:
+                    return found
+
+    return _pick_url(payload)
+
+
+async def resolve_tiktok_page_to_cdn_url(
+    page_url: str,
+    *,
+    backend_public_url: str,
+) -> str | None:
+    """
+    Resolve a TikTok page/short link to a direct CDN play URL via RapidAPI (tiktok-scraper7).
+    Uses the same provider as product analysis search.
+    """
+    if not RAPIDAPI_KEY:
+        logger.error("RAPIDAPI_KEY is not configured — cannot resolve TikTok page URLs")
+        return None
+
+    safe_page = coerce_media_url(page_url, backend_public_url=backend_public_url)
+    if not safe_page:
+        return None
+
+    endpoints: tuple[tuple[str, dict[str, str]], ...] = (
+        ("https://tiktok-scraper7.p.rapidapi.com/", {"url": safe_page, "hd": "1"}),
+        ("https://tiktok-scraper7.p.rapidapi.com/feed/post", {"url": safe_page, "hd": "1"}),
+    )
+
+    headers = _rapidapi_headers()
+    last_error = ""
+
+    async with httpx.AsyncClient() as client:
+        for api_url, params in endpoints:
+            try:
+                response = await client.get(
+                    api_url,
+                    headers=headers,
+                    params=params,
+                    timeout=20.0,
+                )
+                if response.status_code != 200:
+                    last_error = f"{api_url} HTTP {response.status_code}"
+                    logger.warning(
+                        "TikTok page resolve failed (%s): %s",
+                        response.status_code,
+                        response.text[:200],
+                    )
+                    continue
+
+                payload = response.json()
+                raw_play = _extract_play_url_from_payload(payload)
+                cdn_url = coerce_media_url(raw_play or "", backend_public_url=backend_public_url)
+                if cdn_url:
+                    logger.info(
+                        "Resolved TikTok page to CDN URL via %s → %s",
+                        api_url.rstrip("/").split("/")[-1] or "root",
+                        cdn_url[:120],
+                    )
+                    return cdn_url
+
+                last_error = f"{api_url} missing play URL in payload"
+                logger.warning("TikTok resolve response had no play URL: %s", str(payload)[:300])
+            except httpx.TimeoutException:
+                last_error = f"{api_url} timed out"
+                logger.warning("TikTok page resolve timed out for %s", safe_page[:120])
+            except Exception as exc:
+                last_error = str(exc)
+                logger.warning("TikTok page resolve error: %s", exc, exc_info=True)
+
+    logger.error(
+        "Could not resolve TikTok page to CDN URL (%s): %s",
+        safe_page[:120],
+        last_error,
+    )
+    return None

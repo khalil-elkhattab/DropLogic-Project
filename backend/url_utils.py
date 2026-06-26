@@ -81,3 +81,52 @@ def sanitize_asset_video_url(raw_url: str, *, backend_public_url: str = "") -> s
         return normalize_media_url(raw_url)
     except ValueError:
         return None
+
+
+_TIKTOK_PAGE_PATH = re.compile(
+    r"^/(?:@[^/]+/video/\d+|t/[A-Za-z0-9]+)",
+    re.IGNORECASE,
+)
+_TIKTOK_SHORT_HOST = re.compile(r"^(?:vm|vt)\.tiktok\.com$", re.IGNORECASE)
+
+
+def is_likely_direct_video_cdn_url(url: str) -> bool:
+    """True when the URL already points at TikTok CDN bytes (not a share/page link)."""
+    lowered = (url or "").lower()
+    if not lowered.startswith(("http://", "https://")):
+        return False
+    if "tiktokcdn" in lowered:
+        return True
+    if "/video/tos/" in lowered:
+        return True
+    if re.search(r"v\d+[-.].*\.tiktok", lowered) and "mime_type=video" in lowered:
+        return True
+    if lowered.endswith(".mp4"):
+        return True
+    return False
+
+
+def is_tiktok_page_url(url: str) -> bool:
+    """
+    True for TikTok share/page links that must be resolved via the scraper API
+    before httpx can download raw MP4 bytes.
+    """
+    text = (url or "").strip()
+    if not text:
+        return False
+    if is_likely_direct_video_cdn_url(text):
+        return False
+
+    try:
+        parsed = urlparse(normalize_media_url(text))
+    except ValueError:
+        return False
+
+    host = (parsed.netloc or "").lower()
+    if _TIKTOK_SHORT_HOST.match(host):
+        return True
+
+    if "tiktok.com" not in host:
+        return False
+
+    return bool(_TIKTOK_PAGE_PATH.match(parsed.path or ""))

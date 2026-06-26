@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from url_utils import normalize_media_url, sanitize_download_url
+from url_utils import is_tiktok_page_url, normalize_media_url, sanitize_download_url
 
 logger = logging.getLogger("droplogic.media")
 
@@ -39,10 +39,42 @@ def resolve_bake_video_url(raw_url: str, *, backend_public_url: str) -> str | No
     """
     Best-effort resolver for bake requests: unwraps proxy paths, fixes //cdn URLs,
     returns None instead of raising.
+
+    Sync helper — accepts TikTok page links for validation; use
+    ``resolve_bake_video_url_async`` in the bake worker to expand page links to CDN URLs.
     """
     if raw_url is None:
         return None
     return coerce_media_url(str(raw_url).strip(), backend_public_url=backend_public_url)
+
+
+async def resolve_bake_video_url_async(
+    raw_url: str,
+    *,
+    backend_public_url: str,
+) -> str | None:
+    """
+    Resolve a bake source URL to a direct downloadable MP4 link.
+
+    - Direct CDN / droplet static URLs pass through unchanged.
+    - TikTok page links (``@user/video/...``, ``vm.tiktok.com``, etc.) are expanded
+      via the RapidAPI tiktok-scraper7 scraper before download.
+    """
+    safe_url = resolve_bake_video_url(raw_url, backend_public_url=backend_public_url)
+    if not safe_url:
+        return None
+
+    if not is_tiktok_page_url(safe_url):
+        return safe_url
+
+    from scrapper import resolve_tiktok_page_to_cdn_url
+
+    logger.info("[BAKE] Resolving TikTok page link to CDN URL: %s", safe_url[:160])
+    cdn_url = await resolve_tiktok_page_to_cdn_url(
+        safe_url,
+        backend_public_url=backend_public_url,
+    )
+    return cdn_url or None
 
 
 def coerce_media_url(raw_url: str, *, backend_public_url: str) -> str | None:

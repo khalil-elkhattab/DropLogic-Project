@@ -18,7 +18,11 @@ from audio_processor import generate_voice_over, mix_voice_and_background
 from caption_engine import generate_burned_captions, get_media_duration_seconds
 from cleanup_assets import cleanup_bake_temp_assets
 from cloud_render import CloudRenderError, download_rendered_video, render_with_failover
-from media_downloader import download_media_to_file, probe_media_url, resolve_bake_video_url
+from media_downloader import (
+    download_media_to_file,
+    probe_media_url,
+    resolve_bake_video_url_async,
+)
 from public_urls import api_public_url, backend_public_origin, static_asset_url
 from usage_quota import record_successful_bake
 from video_baker import FFmpegBakeError, bake_final_mp4, ffmpeg_available
@@ -221,13 +225,14 @@ async def _execute_bake_pipeline(
         job_id,
     )
 
-    source_video_url = resolve_bake_video_url(
+    source_video_url = await resolve_bake_video_url_async(
         raw_video_input,
         backend_public_url=backend_public_origin(),
     )
     if not source_video_url:
         raise BakePipelineError(
-            "Source video URL is invalid, blocked, or missing https://. "
+            "Source video URL is invalid, blocked, or could not be resolved from a TikTok page link. "
+            "Paste a TikTok video URL or a direct CDN link. "
             f"Received: {raw_video_input[:120]!r}"
         )
 
